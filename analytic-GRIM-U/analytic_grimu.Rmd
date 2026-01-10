@@ -1,0 +1,1079 @@
+---
+title: "Validation of Grimes' GRIM-U code"
+author: "Ian Hussey"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+
+# Critiques of original GRIMU code
+
+1. Treats all integer U values as involving no ties
+
+But integer U values can come from ties that sum to .0. This undermines the purpose of the test: "the reported p value is impossible OR we didn't look in the right place for it". 
+
+2. Non-deterministic solution undermines the interpretation of "inconsistent" results 
+
+Because the monte carlo engine explores random combinations of ranks, and without successive approximation, an "inconsistent" result (where obtained p values do not accommodate the reported p value) has to be interpreted as "the reported p value is impossible OR we didn't look hard enough for it". This undermines the core purpose of the test. 
+
+
+
+```{r include=FALSE}
+
+# formatting options
+# set default chunk options
+knitr::opts_chunk$set(message = FALSE, 
+                      warning = FALSE)
+
+```
+
+# Dependencies
+
+```{r}
+
+library(tidyverse)
+library(waldo)
+
+```
+
+# Grimes' original code (v2)
+
+note that the original code produces "exact" p values when U ends in .5, but actually it silently falls back on the approximation.
+
+```{r}
+
+simrank <- function(n1, n2, U_target, max_iter = 100000) {
+  total_ranks <- 1:(n1 + n2)
+  R1_target <- U_target + n1 * (n1 + 1) / 2
+  
+  for (i in 1:max_iter) {
+    group1_ranks <- sort(sample(total_ranks, n1, replace = FALSE))
+    if (sum(group1_ranks) == R1_target) {
+      group2_ranks <- setdiff(total_ranks, group1_ranks)
+      return(list(
+        group1_ranks = group1_ranks,
+        group2_ranks = group2_ranks,
+        U = U_target
+      ))
+    }
+  }
+  
+  # Return NA instead of stopping with an error
+  return(NA)
+}
+
+
+#Here enter in your n1 and n2
+n1 <- 18
+n2 <- 60
+
+#Expected stats (Ties and no ties)
+uexp <- (n1*n2)/2
+seu <- sqrt(n1*n2*(n1+n2+1)/12)
+seu_tie <- sqrt(n1*n2*(n1+n2+1)/12 - n1*n2*(7)/(12*(n1 + n2)*(n1 + n2 - 1)) )
+
+#range of p-values of interest
+pvals <- seq(0.01, 0.10, by = 0.005)
+zscores <- qnorm(1 - pvals/2)
+
+#conversion (no ties)
+upred <- seu*zscores + uexp  #has higher max value
+upredtie <- seu_tie*zscores + uexp #has lower min value 
+vals <- seq(floor(upredtie[length(upredtie)]),ceiling(upred[1]) , by = 0.5)
+exactval <- rep(NA_real_, length(vals))
+spssval <- rep(NA_real_, length(vals))
+
+
+
+
+#Let it run 
+i <- 1
+while (i <= length(vals)) {
+  k <- vals[i]
+  j <- simrank(n1, n2, U_target = round(k))
+  
+  # Skip iteration if simulation failed
+  if (is.na(j[1])) {
+    exactval[i] <- NA
+    spssval[i] <- NA
+    i <- i + 1
+    next
+  }
+
+  # If k is an integer
+  if (round(k) == k) {
+    m1 <- wilcox.test(j$group1_ranks, j$group2_ranks)
+    m2 <- wilcox.test(j$group1_ranks, j$group2_ranks, correct = FALSE, exact = FALSE)
+  } else {
+    # Adjust one value to simulate a fractional rank
+    w <- which(diff(j$group2_ranks) == 2)[1]
+    if (!is.na(w)) {
+      mv <- j$group2_ranks[w]
+      j$group2_ranks[w] <- mv + 0.5
+
+      w2 <- which(j$group1_ranks == mv + 1)
+      if (length(w2) > 0) {
+        j$group1_ranks[w2] <- mv + 0.5
+      }
+    }
+
+    m1 <- wilcox.test(j$group1_ranks, j$group2_ranks)
+    m2 <- wilcox.test(j$group1_ranks, j$group2_ranks, correct = FALSE, exact = FALSE)
+  }
+
+  exactval[i] <- m1$p.value
+  spssval[i] <- m2$p.value
+
+  i <- i + 1
+}
+
+n1v <- rep(n1,i-1)
+n2v <- rep(n2,i-1)
+
+df <- data.frame("U_Values" = vals, "P_Exact" = exactval, "Approx P" = spssval)
+df$Diff <- abs(df$Approx.P - df$P_Exact)
+df$n1 <- n1v
+df$n2 <- n2v
+
+```
+
+Ian's minor addition to allow comparisons:
+
+```{r}
+
+df <- df |>
+  rename(p_approx = Approx.P,
+         p_exact = P_Exact) |>
+  as_tibble()
+
+```
+
+# Fixed issue re rounding k
+
+simrank() requires an integer input for U. To simulate a half-integer target (e.g., 70.5), the code must simulate the integer above it (e.g., 71) and then force a tie. This tie mathematically subtracts 0.5 from the score, hitting the target ($71 - 0.5 = 70.5$).
+
+However, the original code used `round()`, which follows "Banker's Rounding" (rounding to the nearest even number). eg
+
+```{r}
+round(0.5)
+round(1.5)
+round(2.5)
+round(3.5)
+round(4.5)
+round(5.5)
+```
+
+This creates a bug in 50% of cases. 
+
+- Failure Case: For a target of 70.5, round(70.5) rounds down to `r round(70.5)`. The tie logic then calculates $70 - 0.5 = 69.5$, which is incorrect.
+- Success Case: For a target of 71.5, round(71.5) rounds up to `r round(71.5)`. The tie logic calculates $72 - 0.5 = 71.5$, which works.
+
+The fix is to use `ceiling()` instead of `round()`. `ceiling()` always rounds up to the next integer, ensuring we always start with the higher value needed for the subtraction logic.
+
+So `j <- simrank(n1, n2, U_target = round(k))` becomes `U0 <- if (k %% 1 != 0) ceiling(k) else k; j <- simrank(n1, n2, U_target = U0)`
+
+An alternative would be Lukas Jung's excellent {roundwork} package for `round_up()` to produce the expected behavior, but that's another dependency.
+
+
+note that this original code still produces "exact" p values when U ends in .5, but actually it silently falls back on the approximation.
+
+```{r}
+
+simrank <- function(n1, n2, U_target, max_iter = 100000) {
+  total_ranks <- 1:(n1 + n2)
+  R1_target <- U_target + n1 * (n1 + 1) / 2
+  
+  for (i in 1:max_iter) {
+    group1_ranks <- sort(sample(total_ranks, n1, replace = FALSE))
+    if (sum(group1_ranks) == R1_target) {
+      group2_ranks <- setdiff(total_ranks, group1_ranks)
+      return(list(
+        group1_ranks = group1_ranks,
+        group2_ranks = group2_ranks,
+        U = U_target
+      ))
+    }
+  }
+  
+  # Return NA instead of stopping with an error
+  return(NA)
+}
+
+
+#Here enter in your n1 and n2
+n1 <- 18
+n2 <- 60
+
+#Expected stats (Ties and no ties)
+uexp <- (n1*n2)/2
+seu <- sqrt(n1*n2*(n1+n2+1)/12)
+seu_tie <- sqrt(n1*n2*(n1+n2+1)/12 - n1*n2*(7)/(12*(n1 + n2)*(n1 + n2 - 1)) )
+
+#range of p-values of interest
+pvals <- seq(0.01, 0.10, by = 0.005)
+zscores <- qnorm(1 - pvals/2)
+
+#conversion (no ties)
+upred <- seu*zscores + uexp  #has higher max value
+upredtie <- seu_tie*zscores + uexp #has lower min value 
+vals <- seq(floor(upredtie[length(upredtie)]),ceiling(upred[1]) , by = 0.5)
+exactval <- rep(NA_real_, length(vals))
+spssval <- rep(NA_real_, length(vals))
+
+
+
+
+#Let it run 
+i <- 1
+while (i <= length(vals)) {
+  k <- vals[i]
+  
+  # changed here:
+  # original
+  # j <- simrank(n1, n2, U_target = round(k))
+  # updated
+  U0 <- if (k %% 1 != 0) ceiling(k) else k
+  j <- simrank(n1, n2, U_target = U0)
+  
+  # Skip iteration if simulation failed
+  if (is.na(j[1])) {
+    exactval[i] <- NA
+    spssval[i] <- NA
+    i <- i + 1
+    next
+  }
+
+  # If k is an integer
+  if (round(k) == k) {
+    m1 <- wilcox.test(j$group1_ranks, j$group2_ranks)
+    m2 <- wilcox.test(j$group1_ranks, j$group2_ranks, correct = FALSE, exact = FALSE)
+  } else {
+    # Adjust one value to simulate a fractional rank
+    w <- which(diff(j$group2_ranks) == 2)[1]
+    if (!is.na(w)) {
+      mv <- j$group2_ranks[w]
+      j$group2_ranks[w] <- mv + 0.5
+
+      w2 <- which(j$group1_ranks == mv + 1)
+      if (length(w2) > 0) {
+        j$group1_ranks[w2] <- mv + 0.5
+      }
+    }
+
+    m1 <- wilcox.test(j$group1_ranks, j$group2_ranks)
+    m2 <- wilcox.test(j$group1_ranks, j$group2_ranks, correct = FALSE, exact = FALSE)
+  }
+
+  exactval[i] <- m1$p.value
+  spssval[i] <- m2$p.value
+
+  i <- i + 1
+}
+
+n1v <- rep(n1,i-1)
+n2v <- rep(n2,i-1)
+
+df_fixed <- data.frame("U_Values" = vals, "P_Exact" = exactval, "Approx P" = spssval)
+df_fixed$Diff <- abs(df_fixed$Approx.P - df_fixed$P_Exact)
+df_fixed$n1 <- n1v
+df_fixed$n2 <- n2v
+
+```
+
+Ian's minor addition to allow comparisons:
+
+```{r}
+
+df_fixed <- df_fixed |>
+  rename(p_approx = Approx.P,
+         p_exact = P_Exact) |>
+  as_tibble()
+
+```
+
+## Comparing original and fixed
+
+```{r}
+
+waldo::compare(df, df_fixed, max_diffs = Inf)
+
+```
+
+- this changes p_exact and p_exact values by up to c. .003, and affects a large proportion of cases. 
+
+# Refactored to functions+purrr::map
+
+```{r fig.height=9, fig.width=9}
+
+source("../R/grim_u.R")
+
+# run the analysis
+df_refactored <- grimu_analyze(n1 = 18, n2 = 60, p_min = 0.01, p_max = 0.10)
+
+df_refactored <- grimu_analyze(n1 = 50, n2 = 50, p_min = 0.001, p_max = 0.05)
+
+# plot
+plot_grimu_steps(df_refactored)
+
+```
+
+## Comparing fixed and refactored
+
+```{r}
+
+waldo::compare(df_fixed, df_refactored, max_diffs = Inf)
+
+```
+
+- the refactored and fixed versions produce identical results, at least for these values of the inputs. 
+
+## Consistency check
+
+```{r}
+
+library(tidyverse)
+
+# --- 4. Consistency Checker Function ---
+grim_u <- function(n1, n2, p_reported, comparison = "equal", digits = 2, 
+                   p_min = NULL, p_max = NULL) {
+  
+  # 1. Smart Range Detection (if not provided)
+  # If checking p=0.04, we don't want to scan 0.01 to 0.10 blindly.
+  # We center the search around the reported value.
+  if (is.null(p_min) || is.null(p_max)) {
+    # Create a reasonable window around the reported p-value
+    # e.g. +/- 0.05 or at least covering the rounding boundaries
+    window <- 10^(-digits) * 5 
+    
+    if (comparison == "less_than") {
+      # For p < 0.05, we need to check values *just below* 0.05 down to near zero
+      p_max_search <- p_reported
+      p_min_search <- max(0.0001, p_reported - 0.05)
+    } else {
+      p_max_search <- p_reported + window
+      p_min_search <- max(0.0001, p_reported - window)
+    }
+  } else {
+    p_min_search <- p_min
+    p_max_search <- p_max
+  }
+  
+  # 2. Run the simulation (Generate potential p-values)
+  # We pass the search range determined above
+  possible_values_df <- grimu_analyze(n1, n2, p_min = p_min_search, p_max = p_max_search)
+  
+  # 3. Define Consistency Logic
+  # We check consistency against both Exact and Approximate calculations
+  
+  check_consistency <- function(simulated_p, reported_p, type, digits) {
+    if (is.na(simulated_p)) return(FALSE)
+    
+    if (type == "equal") {
+      # Standard Rounding Check: Does round(simulated) == reported?
+      # We round to the specific number of digits provided.
+      return(roundwork::round_up(simulated_p, digits) == reported_p)
+    } else if (type == "less_than") {
+      # Threshold Check: Is the simulated value strictly less than the reported threshold?
+      # We allow for floating point tolerance
+      return(simulated_p < reported_p)
+    } else {
+      stop("Invalid comparison type. Use 'equal' or 'less_than'.")
+    }
+  }
+  
+  # 4. Apply Logic to DataFrame
+  results_checked <- possible_values_df %>%
+    rowwise() %>%
+    mutate(
+      consistent_exact = check_consistency(p_exact, p_reported, comparison, digits),
+      consistent_approx = check_consistency(p_approx, p_reported, comparison, digits),
+      is_consistent = consistent_exact | consistent_approx
+    ) %>%
+    ungroup()
+  
+  # 5. Determine Overall Consistency
+  # Is there AT LEAST one U-value that could produce the reported p-value?
+  overall_consistency <- any(results_checked$is_consistent)
+  
+  # 6. Construct Summary Output
+  summary_df <- tibble(
+    n1 = n1,
+    n2 = n2,
+    p_reported = p_reported,
+    comparison = comparison,
+    digits = digits,
+    consistent = overall_consistency
+  )
+  
+  return(list(
+    summary = summary_df,
+    details = results_checked
+  ))
+}
+
+# --- Usage Example ---
+
+# Scenario 1: Paper reports p = 0.04 (equal), derived from N=18, N=60
+# Logic: Checks if any possible p-value rounds to 0.04
+check1 <- grim_u(n1 = 18, n2 = 60, p_reported = 0.04, comparison = "equal", digits = 2,
+                 p_min = 0.01, p_max = 0.10)
+
+check1 <- grim_u(n1 = 18, n2 = 60, p_reported = 0.04, comparison = "equal", digits = 2)
+
+print(check1$summary)
+# View specific matches
+check1$details %>% filter(is_consistent)
+
+# # Scenario 2: Paper reports p < 0.05
+# # Logic: Checks if any possible p-value is < 0.05 in the searched range
+# check2 <- grim_u(n1 = 18, n2 = 60, p_reported = 0.05, comparison = "less_than", digits = 2)
+# 
+# print(check2$summary)
+
+```
+
+# Heavily refactored as math rather than sim
+
+note that the original code produces "exact" p values when U ends in .5, but actually it silently falls back on the approximation.
+
+```{r}
+
+library(tidyverse)
+
+grimu_analyze_math <- function(n1, n2, p_min = 0.01, p_max = 0.10, step = 0.5) {
+  
+  # --- 1. Constants & Setup ---
+  N <- n1 + n2
+  mu <- (n1 * n2) / 2
+  
+  # Standard Error (No ties)
+  sigma_no_ties <- sqrt((n1 * n2 * (N + 1)) / 12)
+  
+  # Standard Error (One pair of ties, size 2)
+  # Formula correction term: Sum(t^3 - t) / (12 * N * (N-1))
+  # For one tie of 2 items: (2^3 - 2) = 6.
+  correction_term <- (n1 * n2 * 6) / (12 * N * (N - 1))
+  sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction_term)
+  
+  # --- 2. Determine U Value Range ---
+  # We use the same logic as your snippet to find bounds
+  z_bounds <- qnorm(1 - c(p_min, p_max) / 2)
+  
+  # Calculate bounds (Upper U corresponds to lower P)
+  u_upper <- mu + (z_bounds[1] * sigma_no_ties)
+  u_lower <- mu + (z_bounds[2] * sigma_one_tie)
+  
+  # Generate Sequence
+  vals <- seq(floor(u_lower), ceiling(u_upper), by = step)
+  
+  # --- 3. Vectorized Calculation (Replaces the Loop) ---
+  results <- tibble(U_values = vals) %>%
+    mutate(
+      is_integer = (U_values %% 1 == 0),
+      
+      # --- EXACT P (Matches m1$p.value) ---
+      # For integer U, we use pwilcox (Exact distribution)
+      # For fractional U (ties), exact p-value is undefined/not computed by default in wilcox.test
+      p_exact = if_else(
+        is_integer,
+        2 * pwilcox(if_else(U_values < mu, U_values, n1 * n2 - U_values), n1, n2),
+        NA_real_
+      ),
+      
+      # --- APPROX P (Matches m2$p.value / SPSSVal) ---
+      # Matches wilcox.test(correct = FALSE, exact = FALSE)
+      # We select the SE based on whether U implies a tie or not.
+      sigma_used = if_else(is_integer, sigma_no_ties, sigma_one_tie),
+      
+      z_score = abs(U_values - mu) / sigma_used,
+      
+      p_approx = 2 * pnorm(z_score, lower.tail = FALSE),
+      
+      # --- Final Formatting ---
+      #diff = abs(p_approx - p_exact),
+      n1 = n1,
+      n2 = n2
+    ) %>%
+    select(n1, n2, U_values, p_exact, p_approx)
+  
+  return(results)
+}
+
+# --- Usage ---
+# Instantaneous results, even for large N
+df_heavilyrefactored <- grimu_analyze_math(n1 = 18, n2 = 60, p_min = 0.01, p_max = 0.10)
+
+df_heavilyrefactored
+
+```
+
+## Comparing fixed and heavily refactored
+
+```{r}
+
+df_fixed_renamed <- df_fixed |>
+  select(n1, n2, U_values = U_Values, p_exact, p_approx)
+
+waldo::compare(df_fixed_renamed, df_heavilyrefactored)
+
+```
+
+## Consistency check
+
+```{r}
+
+grim_u_fast <- function(n1, n2, p_reported, comparison = "equal", digits = 2, 
+                        p_min = NULL, p_max = NULL) {
+  
+  # --- 1. Smart Range Detection ---
+  if (is.null(p_min) || is.null(p_max)) {
+    # Define a wide window to capture any potential floating point boundaries
+    # e.g., for 2 digits (0.01), window is 0.05
+    window <- 10^(-digits) * 5 
+    
+    if (comparison == "less_than") {
+      # Scan from effectively zero up to the reported threshold
+      p_max_search <- p_reported + window # slight buffer above
+      p_min_search <- 0.0000001
+    } else {
+      # Scan around the reported value
+      p_max_search <- p_reported + window
+      p_min_search <- max(0.0000001, p_reported - window)
+    }
+  } else {
+    p_min_search <- p_min
+    p_max_search <- p_max
+  }
+  
+  # --- 2. Math-Based Generation (No Simulation Loop) ---
+  
+  # A. Constants
+  N <- n1 + n2
+  mu <- (n1 * n2) / 2
+  
+  # SE for Integer U (No ties)
+  sigma_no_ties <- sqrt((n1 * n2 * (N + 1)) / 12)
+  
+  # SE for Fractional U (One pair of ties, size 2)
+  # Correction reduces variance by: n1 * n2 * (t^3 - t) / (12 * N * (N - 1))
+  correction <- (n1 * n2 * 6) / (12 * N * (N - 1))
+  sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction)
+  
+  # B. Determine U Bounds from P-value Range
+  # Convert p-search range to Z-scores to find U limits
+  # (Using sigma_no_ties is sufficient for bounds estimation)
+  z_bounds <- qnorm(1 - c(p_min_search, p_max_search) / 2)
+  
+  # Calculate U bounds (Note: z_bounds[1] is larger Z -> smaller P -> larger deviation from mean)
+  # We look at both tails (U < mu and U > mu)
+  u_deviation_max <- abs(z_bounds[1] * sigma_no_ties) 
+  
+  # We sweep a range of U values wide enough to cover the p-value window
+  # We construct the sequence relative to the mean (mu)
+  u_start <- floor(mu - u_deviation_max - 2) # buffer of 2
+  u_end   <- ceiling(mu + u_deviation_max + 2)
+  
+  # Ensure we stay within possible U range [0, n1*n2]
+  u_start <- max(0, u_start)
+  u_end   <- min(n1 * n2, u_end)
+  
+  vals <- seq(u_start, u_end, by = 0.5)
+  
+  # C. Calculate Probabilities (Vectorized)
+  results_df <- tibble(U = vals) %>%
+    mutate(
+      is_integer = (U %% 1 == 0),
+      
+      # Exact P (Only valid for integers)
+      p_exact = if_else(
+        is_integer,
+        2 * pwilcox(if_else(U < mu, U, n1 * n2 - U), n1, n2),
+        NA_real_
+      ),
+      
+      # Approximate P (Z-test)
+      sigma = if_else(is_integer, sigma_no_ties, sigma_one_tie),
+      
+      # Continuity correction (-0.5) only for Integers
+      z_score = if_else(
+        is_integer,
+        (abs(U - mu) - 0.5) / sigma,
+        abs(U - mu) / sigma
+      ),
+      
+      p_approx = 2 * pnorm(z_score, lower.tail = FALSE)
+    )
+  
+  # --- 4. Consistency Logic ---
+  
+  results_checked <- results_df %>%
+    mutate(
+      # Check consistency based on comparison type
+      consistent_exact = case_when(
+        is.na(p_exact) ~ FALSE,
+        comparison == "equal" ~ roundwork::round_up(p_exact, digits) == p_reported,
+        comparison == "less_than" ~ p_exact < p_reported
+      ),
+      
+      consistent_approx = case_when(
+        comparison == "equal" ~ roundwork::round_up(p_approx, digits) == p_reported,
+        comparison == "less_than" ~ p_approx < p_reported
+      ),
+      
+      # Overall consistency for this U value
+      is_consistent = consistent_exact | consistent_approx
+    ) %>%
+    # Filter to only keep relevant rows for the output
+    filter(
+      is_consistent | 
+      (p_exact >= p_min_search & p_exact <= p_max_search) |
+      (p_approx >= p_min_search & p_approx <= p_max_search)
+    )
+  
+  # --- 5. Summary Output ---
+  overall_consistency <- any(results_checked$is_consistent)
+  
+  summary_df <- tibble(
+    n1 = n1,
+    n2 = n2,
+    p_reported = p_reported,
+    comparison = comparison,
+    digits = digits,
+    consistent = overall_consistency
+  )
+  
+  return(list(
+    summary = summary_df,
+    details = results_checked
+  ))
+}
+
+# consistent
+check1 <- grim_u_fast(n1 = 18, n2 = 60, p_reported = 0.04, digits = 2)
+check1
+
+# inconsistent
+check2 <- grim_u_fast(n1 = 5, n2 = 5, p_reported = 0.080, digits = 3)
+check2
+
+```
+
+## Multiple experimenter degrees of freedom
+
+p_exact (gold standard. default in R if n<50 and no ties, optional in SPSS with an add on module)
+p_asymp_uncorrected: A raw Z-test. (SPSS, stata, optional in python through scipy)
+p_asymp_corrected: The Normal Approximation with Continuity Correction. (R)
+
+
+```{r}
+
+grim_u_comprehensive <- function(n1, n2, p_reported, comparison = "equal", digits = 2, 
+                                 p_min = NULL, p_max = NULL) {
+  
+  # --- 1. Smart Range Detection ---
+  if (is.null(p_min) || is.null(p_max)) {
+    window <- 10^(-digits) * 5 
+    if (comparison == "less_than") {
+      p_max_search <- p_reported + window 
+      p_min_search <- 0.0000001
+    } else {
+      p_max_search <- p_reported + window
+      p_min_search <- max(0.0000001, p_reported - window)
+    }
+  } else {
+    p_min_search <- p_min
+    p_max_search <- p_max
+  }
+  
+  # --- 2. Math-Based Generation ---
+  N <- n1 + n2
+  mu <- (n1 * n2) / 2
+  
+  # Standard Errors
+  sigma_no_ties <- sqrt((n1 * n2 * (N + 1)) / 12)
+  correction_term <- (n1 * n2 * 6) / (12 * N * (N - 1))
+  sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction_term)
+  
+  # Determine bounds (using uncorrected Z for widest possible search)
+  z_bounds <- qnorm(1 - c(p_min_search, p_max_search) / 2)
+  u_deviation_max <- abs(z_bounds[1] * sigma_no_ties) 
+  
+  u_start <- max(0, floor(mu - u_deviation_max - 2))
+  u_end   <- min(n1 * n2, ceiling(mu + u_deviation_max + 2))
+  
+  vals <- seq(u_start, u_end, by = 0.5)
+  
+  # --- 3. Vectorized Calculations (All 3 Methods) ---
+  results_df <- tibble(U = vals) %>%
+    mutate(
+      is_integer = (U %% 1 == 0),
+      sigma = if_else(is_integer, sigma_no_ties, sigma_one_tie),
+      
+      # A. EXACT Method (R default for small N, no ties)
+      p_exact = if_else(
+        is_integer,
+        2 * pwilcox(if_else(U < mu, U, n1 * n2 - U), n1, n2),
+        NA_real_
+      ),
+      
+      # B. ASYMPTOTIC CORRECTED (R default for ties/large N)
+      # Apply |U - mu| - 0.5
+      z_corrected = (abs(U - mu) - 0.5) / sigma,
+      p_asymp_corrected = 2 * pnorm(z_corrected, lower.tail = FALSE),
+      
+      # C. ASYMPTOTIC UNCORRECTED (SPSS Default)
+      # Apply |U - mu|
+      z_uncorrected = abs(U - mu) / sigma,
+      p_asymp_uncorrected = 2 * pnorm(z_uncorrected, lower.tail = FALSE)
+    )
+  
+  # --- 4. Consistency Logic ---
+  
+  # Helper to check a single column against reported p
+  check_col <- function(col_val, p_rep, comp, dig) {
+    if (comp == "equal") {
+      # Use roundwork::round_up if available, else standard check
+      # roundwork::round_up(col_val, dig) == p_rep
+      # (Using simplified logic here for standalone functioning):
+      round(col_val + 1e-10, dig) == p_rep 
+    } else {
+      col_val < p_rep
+    }
+  }
+  
+  results_checked <- results_df %>%
+    rowwise() %>%
+    mutate(
+      # Check all 3 methods
+      valid_exact = !is.na(p_exact) && check_col(p_exact, p_reported, comparison, digits),
+      valid_corrected = check_col(p_asymp_corrected, p_reported, comparison, digits),
+      valid_uncorrected = check_col(p_asymp_uncorrected, p_reported, comparison, digits),
+      
+      # Overall consistency
+      is_consistent = valid_exact | valid_corrected | valid_uncorrected
+    ) %>%
+    ungroup() %>%
+    filter(
+      is_consistent | 
+      (p_asymp_uncorrected >= p_min_search & p_asymp_uncorrected <= p_max_search)
+    )
+  
+  # --- 5. Summary Output ---
+  summary_df <- tibble(
+    n1 = n1,
+    n2 = n2,
+    p_reported = p_reported,
+    consistent = any(results_checked$is_consistent),
+    # Add flags to see WHICH methods worked (helpful for diagnosis)
+    matches_exact = any(results_checked$valid_exact),
+    matches_r_corrected = any(results_checked$valid_corrected),
+    matches_spss_uncorrected = any(results_checked$valid_uncorrected)
+  )
+  
+  return(list(
+    summary = summary_df,
+    details = results_checked
+  ))
+}
+
+plot_grimu_granularity <- function(grimu_output, p_reported = NULL) {
+  
+  # Extract the details dataframe
+  df_results <- grimu_output$details
+  
+  # 1. Reshape data to long format
+  plot_data <- df_results %>%
+    pivot_longer(
+      cols = c(p_exact, p_asymp_corrected, p_asymp_uncorrected),
+      names_to = "Method",
+      values_to = "p_value"
+    ) %>%
+    # Filter out NAs (e.g. Exact test on fractional U)
+    filter(!is.na(p_value)) %>%
+    mutate(
+      Method = recode(Method, 
+                      "p_exact" = "Exact (R Default <50)", 
+                      "p_asymp_corrected" = "Asymp. Corrected (R Default)",
+                      "p_asymp_uncorrected" = "Asymp. Uncorrected (SPSS Default)")
+    )
+  
+  # 2. Base Plot
+  p <- ggplot(plot_data, aes(x = U, y = p_value, color = Method)) +
+    
+    # A. The Steps (The "Staircase")
+    # direction "mid" often looks clearer for theoretical distributions, 
+    # but "vh" (vertical-horizontal) emphasizes the discrete jump better.
+    geom_step(direction = "vh", alpha = 0.5, linewidth = 0.8) +
+    
+    # B. The Valid Points (The "Landings")
+    # We use shape to distinguish integer vs fractional U
+    geom_point(aes(shape = is_integer), size = 2.5, alpha = 0.8) +
+    
+    # C. Scales & Colors
+    scale_y_continuous(n.breaks = 10) +
+    scale_x_continuous(n.breaks = 10) +
+    scale_color_brewer(palette = "Dark2") +
+    scale_shape_manual(values = c("TRUE" = 16, "FALSE" = 1), 
+                       labels = c("TRUE" = "Integer (No Ties)", "FALSE" = "Fractional (Ties)"),
+                       name = "U Type") +
+    
+    # D. Labels
+    labs(
+      title = "GRIM-U: Granularity of P-values",
+      subtitle = paste0("N1 = ", unique(grimu_output$summary$n1), 
+                        ", N2 = ", unique(grimu_output$summary$n2)),
+      x = "Mann-Whitney U Statistic",
+      y = "Calculated P-value",
+      caption = "Solid dots = Integer U (No ties). Open circles = Fractional U (Ties)."
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      panel.grid.minor = element_blank()
+    )
+  
+  # 3. Optional: Add Reported P-value line
+  if (!is.null(p_reported)) {
+    p <- p + 
+      geom_hline(yintercept = p_reported, linetype = "dashed", color = "red", linewidth = 1) +
+      annotate("text", x = min(plot_data$U), y = p_reported, 
+               label = paste0(" Reported p = ", p_reported), 
+               vjust = -0.5, hjust = 0, color = "red", fontface = "bold")
+  }
+  
+  return(p)
+}
+
+# consistent
+check1 <- grim_u_comprehensive(n1 = 18, n2 = 60, p_reported = 0.04, digits = 2)
+check1
+
+# inconsistent
+check2 <- grim_u_comprehensive(n1 = 5, n2 = 5, p_reported = 0.11, digits = 2)
+check2
+
+plot_grimu_steps(check1$details)
+
+
+plot_grimu_granularity(check1)
+
+
+```
+
+## Saturation detection
+
+```{r}
+
+library(tidyverse)
+
+# Function to calculate saturation for a specific N1, N2 pair
+calc_grimu_saturation <- function(n1, n2, decimals = 3, p_threshold = 0.05) {
+  
+  # 1. Generate ALL possible U values (Integer and Half-Integer)
+  # We only care about the lower tail (U < Mean) for p < 0.5
+  max_u <- floor((n1 * n2) / 2)
+  u_vals <- seq(0, max_u, by = 0.5)
+  
+  N <- n1 + n2
+  mu <- (n1 * n2) / 2
+  
+  # Standard Errors
+  sigma_no_ties <- sqrt((n1 * n2 * (N + 1)) / 12)
+  correction <- (n1 * n2 * 6) / (12 * N * (N - 1))
+  sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction)
+  
+  # 2. Calculate P-values for all U
+  # We calculate all 3 types (Exact, Corrected, Uncorrected) to be maximally permissive
+  p_space <- tibble(U = u_vals) %>%
+    mutate(
+      is_integer = (U %% 1 == 0),
+      sigma = if_else(is_integer, sigma_no_ties, sigma_one_tie),
+      
+      # Exact (Only if integer)
+      p_exact = if_else(is_integer, 2 * pwilcox(U, n1, n2), NA_real_),
+      
+      # Asymp Corrected
+      z_corr = (abs(U - mu) - 0.5) / sigma,
+      p_corr = 2 * pnorm(z_corr, lower.tail = FALSE),
+      
+      # Asymp Uncorrected
+      z_uncorr = abs(U - mu) / sigma,
+      p_uncorr = 2 * pnorm(z_uncorr, lower.tail = FALSE)
+    ) %>%
+    pivot_longer(cols = starts_with("p_"), values_to = "p_val") %>%
+    filter(!is.na(p_val)) %>%
+    filter(p_val <= p_threshold) %>%
+    # Round to the target precision
+    mutate(p_rounded = round(p_val, decimals)) %>%
+    distinct(p_rounded)
+  
+  # 3. Calculate Coverage
+  # How many unique rounded p-values exist in the range [0, p_threshold]?
+  # E.g., for p < .05 at 3 decimals, there are 51 slots (0.000 to 0.050)
+  total_slots <- length(seq(0, p_threshold, by = 10^-decimals))
+  covered_slots <- nrow(p_space)
+  
+  return(covered_slots / total_slots)
+}
+
+# --- Run the Grid Search ---
+
+# Assuming balanced groups for simplicity (n1 approx n2), or random split
+results_grid <- expand_grid(
+  n_total = seq(10, 250, by = 5)
+) %>%
+  mutate(
+    n1 = floor(n_total / 2),
+    n2 = ceiling(n_total / 2),
+    
+    # Calculate coverage for 2 decimals (p < .05)
+    saturation_2dec = map2_dbl(n1, n2, ~calc_grimu_saturation(.x, .y, decimals = 2, p_threshold = 0.05)),
+    
+    # Calculate coverage for 3 decimals (p < .05)
+    saturation_3dec = map2_dbl(n1, n2, ~calc_grimu_saturation(.x, .y, decimals = 3, p_threshold = 0.05)),
+    
+    # Calculate coverage for 3 decimals (p < .05)
+    saturation_4dec = map2_dbl(n1, n2, ~calc_grimu_saturation(.x, .y, decimals = 4, p_threshold = 0.05))
+  )
+
+# --- Visualize ---
+
+ggplot(results_grid, aes(x = n_total)) +
+  geom_line(aes(y = saturation_2dec, color = "2 Decimals"), linewidth = 1.2) +
+  geom_line(aes(y = saturation_3dec, color = "3 Decimals"), linewidth = 1.2) +
+  geom_line(aes(y = saturation_4dec, color = "4 Decimals"), linewidth = 1.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = scales::breaks_pretty(n = 10)) +
+  labs(
+    title = "When does GRIM-U become useless?",
+    subtitle = "Proportion of valid p-values (p < .05) that are mathematically possible",
+    x = "Total Sample Size (N1 + N2)",
+    y = "Saturation (Consistency Rate)",
+    color = "Rounding Precision"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+# unbalanced
+
+comparison_grid <- expand_grid(
+  n_total = seq(8, 100, by = 1)
+) %>%
+  mutate(
+    # Design 1: Balanced (approx 50/50)
+    n1_bal = floor(n_total * 0.5),
+    n2_bal = ceiling(n_total * 0.5),
+    
+    # Design 2: Unbalanced (approx 10/90)
+    n1_unbal = floor(n_total * 0.4),
+    n2_unbal = ceiling(n_total * 0.6),
+    
+    # Design 2: Unbalanced (approx 10/90)
+    n1_unbal_extreme = floor(n_total * 0.2),
+    n2_unbal_extreme = ceiling(n_total * 0.8),
+    
+    # Calculate Saturation (3 decimal places)
+    sat_balanced = map2_dbl(n1_bal, n2_bal, ~calc_grimu_saturation(.x, .y, decimals = 3)),
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~calc_grimu_saturation(.x, .y, decimals = 3)),
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~calc_grimu_saturation(.x, .y, decimals = 3))
+  )
+
+# --- Plot ---
+
+comparison_grid %>%
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") %>%
+  mutate(Design = recode(Design, 
+                         "sat_balanced" = "Balanced N (1:1)", 
+                         "sat_unbalanced" = "Unbalanced N (1:2)", 
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4)")) %>%
+  ggplot(aes(x = n_total, y = Saturation, color = Design)) +
+  geom_line(linewidth = 1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "The Forensic Power of GRIM-U",
+    subtitle = "Proportion of valid p-values (p < .05, 3 decimals)\nthat are mathematically possible",
+    x = "Total Sample Size (N)",
+    y = "Saturation"
+  ) +
+  theme_linedraw(base_size = 14)
+
+```
+
+## Engineer it better so there's a single shared engine
+
+```{r}
+
+source("../R/grimu_refactored.R")
+
+```
+
+usage 
+
+```{r}
+
+# consistent
+check1 <- grimu_check(n1 = 18, n2 = 60, p_reported = 0.04, digits = 2)
+check1
+
+# inconsistent
+check2 <- grimu_check(n1 = 5, n2 = 5, p_reported = 0.11, digits = 2)
+check2
+
+```
+
+```{r}
+
+grimu_saturation(n1 = 50, n2 = 50, decimals = 2) # Should be 1.0 (100% useless)
+grimu_saturation(n1 = 10, n2 = 90, decimals = 3) # Should be < 1.0 (Useful)
+
+
+
+comparison_grid <- expand_grid(
+  n_total = seq(8, 100, by = 1)
+) %>%
+  mutate(
+    # Design 1: Balanced (approx 50/50)
+    n1_bal = floor(n_total * 0.5),
+    n2_bal = ceiling(n_total * 0.5),
+    
+    # Design 2: Unbalanced (approx 10/90)
+    n1_unbal = floor(n_total * 0.4),
+    n2_unbal = ceiling(n_total * 0.6),
+    
+    # Design 2: Unbalanced (approx 10/90)
+    n1_unbal_extreme = floor(n_total * 0.2),
+    n2_unbal_extreme = ceiling(n_total * 0.8),
+    
+    # Calculate Saturation (3 decimal places)
+    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 3)),
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 3)),
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 3))
+  )
+
+comparison_grid %>%
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") %>%
+  mutate(Design = recode(Design, 
+                         "sat_balanced" = "Balanced N (1:1)", 
+                         "sat_unbalanced" = "Unbalanced N (1:2)", 
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4)")) %>%
+  ggplot(aes(x = n_total, y = Saturation, color = Design)) +
+  geom_line(linewidth = 1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "The Forensic Power of GRIM-U",
+    subtitle = "Proportion of valid p-values (p < .05, 3 decimals)\nthat are mathematically possible",
+    x = "Total Sample Size (N)",
+    y = "Saturation (False negatives)"
+  ) +
+  theme_linedraw(base_size = 14)
+
+```
