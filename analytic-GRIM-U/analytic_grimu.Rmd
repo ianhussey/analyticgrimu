@@ -14,13 +14,13 @@ output:
 
 # Critiques of original GRIMU code
 
-1. Treats all integer U values as involving no ties
-
-But integer U values can come from ties that sum to .0. This undermines the purpose of the test: "the reported p value is impossible OR we didn't look in the right place for it". 
-
-2. Non-deterministic solution undermines the interpretation of "inconsistent" results 
+1. Non-deterministic solution undermines the interpretation of "inconsistent" results 
 
 Because the monte carlo engine explores random combinations of ranks, and without successive approximation, an "inconsistent" result (where obtained p values do not accommodate the reported p value) has to be interpreted as "the reported p value is impossible OR we didn't look hard enough for it". This undermines the core purpose of the test. 
+
+2. Treats all integer U values as involving no ties
+
+But integer U values can come from ties that sum to .0. This undermines the purpose of the test: "the reported p value is impossible OR we didn't look in the right place for it". 
 
 
 
