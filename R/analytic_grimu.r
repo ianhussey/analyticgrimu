@@ -2,7 +2,10 @@ library(tidyverse)
 library(roundwork)
 
 # core engine
-grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL) {
+grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL, alternative = "two.sided") {
+  
+  # Validate input
+  alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
   
   # --- Constants ---
   N <- n1 + n2
@@ -26,6 +29,11 @@ grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL) {
   correction_term <- (n1 * n2 * 6) / (12 * N * (N - 1))
   sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction_term)
   
+  # --- Helper: P-value Multiplier ---
+  # If two-sided, we multiply the tail probability by 2.
+  # If one-sided, we strictly take the tail probability.
+  tail_mult <- if (alternative == "two.sided") 2 else 1
+  
   # --- Vectorized Calculation ---
   results_df <- tibble(U = vals) %>%
     mutate(
@@ -33,31 +41,36 @@ grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL) {
       
       # --- A. Exact Method ---
       # STRICT: Only valid for Integers. 
-      # pwilcox is mathematically undefined for fractional quantiles.
-      p_exact = if_else(
+      # pwilcox gives P(X <= x). For symmetric distributions, P(X <= U) is the tail.
+      p_exact_raw = if_else(
         is_integer,
-        2 * pwilcox(if_else(U < mu, U, n1 * n2 - U), n1, n2),
+        pwilcox(if_else(U < mu, U, n1 * n2 - U), n1, n2),
         NA_real_
       ),
+      p_exact = p_exact_raw * tail_mult,
       
       # --- B. Asymptotic (NO TIES Variance) ---
       # PERMISSIVE: Calculated for ALL U (Integer and Fractional).
       # Catches cases where researcher has ties (Fractional U) but used wrong Sigma.
-      z_corr_no_ties   = pmax(0, abs(U - mu) - 0.5) / sigma_no_ties, # clamp continuity correction
-      p_corr_no_ties   = 2 * pnorm(z_corr_no_ties, lower.tail = FALSE),
+      z_corr_no_ties   = pmax(0, abs(U - mu) - 0.5) / sigma_no_ties,
+      p_corr_no_ties   = pnorm(z_corr_no_ties, lower.tail = FALSE) * tail_mult,
       
       z_uncorr_no_ties = abs(U - mu) / sigma_no_ties,
-      p_uncorr_no_ties = 2 * pnorm(z_uncorr_no_ties, lower.tail = FALSE),
+      p_uncorr_no_ties = pnorm(z_uncorr_no_ties, lower.tail = FALSE) * tail_mult,
       
       # --- C. Asymptotic (TIES Variance) ---
       # PERMISSIVE: Calculated for ALL U.
       # Catches cases where researcher has Integer U but hidden ties.
-      z_corr_tied      = pmax(0, abs(U - mu) - 0.5) / sigma_one_tie, # clamp continuity correction
-      p_corr_tied      = 2 * pnorm(z_corr_tied, lower.tail = FALSE),
+      z_corr_tied      = pmax(0, abs(U - mu) - 0.5) / sigma_one_tie,
+      p_corr_tied      = pnorm(z_corr_tied, lower.tail = FALSE) * tail_mult,
       
       z_uncorr_tied    = abs(U - mu) / sigma_one_tie,
-      p_uncorr_tied    = 2 * pnorm(z_uncorr_tied, lower.tail = FALSE)
-    )
+      p_uncorr_tied    = pnorm(z_uncorr_tied, lower.tail = FALSE) * tail_mult
+    ) %>%
+    # Ensure one-sided tests don't exceed 1.0 (though rare for tails)
+    # and two-sided tests are clamped at 1.0.
+    mutate(across(starts_with("p_"), ~ pmin(1, .))) %>%
+    select(-p_exact_raw)
   
   return(results_df)
 }
