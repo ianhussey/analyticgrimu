@@ -1011,7 +1011,7 @@ comparison_grid %>%
 
 ```{r}
 
-source("../R/grimu_refactored.R")
+source("../R/analytic_grimu.R")
 
 ```
 
