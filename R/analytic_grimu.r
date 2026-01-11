@@ -2,7 +2,7 @@ library(tidyverse)
 library(roundwork)
 
 # core engine
-grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL, alternative = "two.sided") {
+grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = "two.sided") {
   
   # Validate input
   alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
@@ -10,67 +10,110 @@ grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL, alternative = "tw
   # --- Constants ---
   N <- n1 + n2
   mu <- (n1 * n2) / 2
+  max_u <- n1 * n2
   
-  # Default to covering the lower half (sufficient for saturation) if max not specified
-  if (is.null(u_max)) u_max <- floor(mu)
+  # --- 1. Dynamic Search Range (Fixing Critique #2) ---
+  # If bounds are missing, default to the mathematically relevant tail.
+  if (is.null(u_min) || is.null(u_max)) {
+    if (alternative == "greater") {
+      # Upper tail: Scan from Mean up to Max U
+      if (is.null(u_min)) u_min <- floor(mu) # Start at mean to catch p~0.5
+      if (is.null(u_max)) u_max <- max_u
+    } else {
+      # Lower tail (Less/Two-sided): Scan from 0 up to Mean
+      if (is.null(u_min)) u_min <- 0
+      if (is.null(u_max)) u_max <- ceiling(mu) # End at mean
+    }
+  }
   
-  # Ensure bounds are safe
   u_start <- max(0, u_min)
-  u_end <- min(n1 * n2, u_max)
+  u_end <- min(max_u, u_max)
   
-  # Use roundwork to ensure clean steps (avoid floating point drift)
+  # Generate Steps
   vals <- roundwork::round_up(seq(u_start, u_end, by = 0.5), 1)
   
-  # --- Standard Errors ---
-  # 1. Sigma assuming NO ties (Max variance)
+  # --- 2. Constants for Calculations ---
   sigma_no_ties <- sqrt((n1 * n2 * (N + 1)) / 12)
   
-  # 2. Sigma assuming ONE pair of ties (Minimal variance reduction)
+  # Sigma for Ties (One Pair)
   correction_term <- (n1 * n2 * 6) / (12 * N * (N - 1))
   sigma_one_tie <- sqrt((n1 * n2 * (N + 1)) / 12 - correction_term)
   
-  # --- Helper: P-value Multiplier ---
-  # If two-sided, we multiply the tail probability by 2.
-  # If one-sided, we strictly take the tail probability.
-  tail_mult <- if (alternative == "two.sided") 2 else 1
-  
-  # --- Vectorized Calculation ---
+  # --- 3. Vectorized Calculation (Fixing Critique #1) ---
   results_df <- tibble(U = vals) %>%
     mutate(
       is_integer = (U %% 1 == 0),
       
       # --- A. Exact Method ---
-      # STRICT: Only valid for Integers. 
-      # pwilcox gives P(X <= x). For symmetric distributions, P(X <= U) is the tail.
-      p_exact_raw = if_else(
-        is_integer,
-        pwilcox(if_else(U < mu, U, n1 * n2 - U), n1, n2),
-        NA_real_
+      p_exact = if_else(is_integer, case_when(
+        alternative == "less"      ~ pwilcox(U, n1, n2),
+        alternative == "greater"   ~ pwilcox(U - 1, n1, n2, lower.tail = FALSE),
+        alternative == "two.sided" ~ {
+          p_lower <- pwilcox(U, n1, n2)
+          p_upper <- pwilcox(U - 1, n1, n2, lower.tail = FALSE)
+          2 * pmin(p_lower, p_upper)
+        }
+      ), NA_real_),
+      
+      # --- B & C. Asymptotic Methods ---
+      # We define a helper to calculate Z and P based on the alternative.
+      # This applies the correct Continuity Correction (+0.5 or -0.5) directionally.
+      
+      # 1. Base Deviations (Unscaled)
+      # Two-sided: |U - mu| - 0.5 (clamped)
+      # Less:      (U - mu) + 0.5
+      # Greater:   (U - mu) - 0.5
+      
+      dev_cc = case_when(
+        alternative == "two.sided" ~ pmax(0, abs(U - mu) - 0.5),
+        alternative == "less"      ~ (U - mu) + 0.5,
+        alternative == "greater"   ~ (U - mu) - 0.5
       ),
-      p_exact = p_exact_raw * tail_mult,
       
-      # --- B. Asymptotic (NO TIES Variance) ---
-      # PERMISSIVE: Calculated for ALL U (Integer and Fractional).
-      # Catches cases where researcher has ties (Fractional U) but used wrong Sigma.
-      z_corr_no_ties   = pmax(0, abs(U - mu) - 0.5) / sigma_no_ties,
-      p_corr_no_ties   = pnorm(z_corr_no_ties, lower.tail = FALSE) * tail_mult,
-      
-      z_uncorr_no_ties = abs(U - mu) / sigma_no_ties,
-      p_uncorr_no_ties = pnorm(z_uncorr_no_ties, lower.tail = FALSE) * tail_mult,
-      
-      # --- C. Asymptotic (TIES Variance) ---
-      # PERMISSIVE: Calculated for ALL U.
-      # Catches cases where researcher has Integer U but hidden ties.
-      z_corr_tied      = pmax(0, abs(U - mu) - 0.5) / sigma_one_tie,
-      p_corr_tied      = pnorm(z_corr_tied, lower.tail = FALSE) * tail_mult,
-      
-      z_uncorr_tied    = abs(U - mu) / sigma_one_tie,
-      p_uncorr_tied    = pnorm(z_uncorr_tied, lower.tail = FALSE) * tail_mult
+      dev_uncorr = case_when(
+        alternative == "two.sided" ~ abs(U - mu),
+        alternative == "less"      ~ (U - mu),
+        alternative == "greater"   ~ (U - mu)
+      )
     ) %>%
-    # Ensure one-sided tests don't exceed 1.0 (though rare for tails)
-    # and two-sided tests are clamped at 1.0.
+    mutate(
+      # Calculate P-values using the correct Sigma and Tail
+      
+      # No Ties (Corrected)
+      z_corr_no_ties = dev_cc / sigma_no_ties,
+      p_corr_no_ties = case_when(
+        alternative == "two.sided" ~ 2 * pnorm(z_corr_no_ties, lower.tail = FALSE),
+        alternative == "less"      ~ pnorm(z_corr_no_ties, lower.tail = TRUE),
+        alternative == "greater"   ~ pnorm(z_corr_no_ties, lower.tail = FALSE)
+      ),
+      
+      # No Ties (Uncorrected)
+      z_uncorr_no_ties = dev_uncorr / sigma_no_ties,
+      p_uncorr_no_ties = case_when(
+        alternative == "two.sided" ~ 2 * pnorm(z_uncorr_no_ties, lower.tail = FALSE),
+        alternative == "less"      ~ pnorm(z_uncorr_no_ties, lower.tail = TRUE),
+        alternative == "greater"   ~ pnorm(z_uncorr_no_ties, lower.tail = FALSE)
+      ),
+      
+      # Tied (Corrected)
+      z_corr_tied = dev_cc / sigma_one_tie,
+      p_corr_tied = case_when(
+        alternative == "two.sided" ~ 2 * pnorm(z_corr_tied, lower.tail = FALSE),
+        alternative == "less"      ~ pnorm(z_corr_tied, lower.tail = TRUE),
+        alternative == "greater"   ~ pnorm(z_corr_tied, lower.tail = FALSE)
+      ),
+      
+      # Tied (Uncorrected)
+      z_uncorr_tied = dev_uncorr / sigma_one_tie,
+      p_uncorr_tied = case_when(
+        alternative == "two.sided" ~ 2 * pnorm(z_uncorr_tied, lower.tail = FALSE),
+        alternative == "less"      ~ pnorm(z_uncorr_tied, lower.tail = TRUE),
+        alternative == "greater"   ~ pnorm(z_uncorr_tied, lower.tail = FALSE)
+      )
+    ) %>%
+    # Final Clamp: Ensure p <= 1 (Standard behavior)
     mutate(across(starts_with("p_"), ~ pmin(1, .))) %>%
-    select(-p_exact_raw)
+    select(U, is_integer, starts_with("p_"))
   
   return(results_df)
 }
