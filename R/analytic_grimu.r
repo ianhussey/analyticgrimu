@@ -64,7 +64,7 @@ grimu_map_pvalues <- function(n1, n2, u_min = 0, u_max = NULL) {
 grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2, 
                         p_min = NULL, p_max = NULL) {
   
-  # --- 1. Smart Range Detection ---
+  # 1. Range Detection 
   if (is.null(p_min) || is.null(p_max)) {
     window <- 10^(-digits) * 5 
     if (comparison == "less_than") {
@@ -79,9 +79,9 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
     p_max_search <- p_max
   }
   
-  # --- 2. Determine U Bounds ---
+  # 2. U Bounds 
   # We need the SE to estimate bounds, so we quickly calc it or grab from engine
-  # (Calculating locally is faster than calling engine just for sigma)
+  # Calculating locally is faster than calling engine just for sigma
   N <- n1 + n2
   sigma_est <- sqrt((n1 * n2 * (N + 1)) / 12)
   mu <- (n1 * n2) / 2
@@ -89,18 +89,20 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
   # Z bounds to U bounds
   z_bounds <- qnorm(1 - c(p_min_search, p_max_search) / 2)
   u_deviation_max <- abs(z_bounds[1] * sigma_est)
-  
   u_start_est <- floor(mu - u_deviation_max - 2)
   u_end_est   <- ceiling(mu + u_deviation_max + 2)
   
-  # --- 3. CALL THE ENGINE ---
+  # 3. Call Updated Engine
   results_df <- grimu_map_pvalues(n1, n2, u_min = u_start_est, u_max = u_end_est)
   
-  # --- 4. Consistency Logic (Same as before) ---
+  # 4. Consistency Logic (Expanded for 5 columns)
   check_col <- function(col_val, p_rep, comp, dig) {
+    # Check for NA (e.g. no-tie calc on fractional U)
+    if (is.na(col_val)) return(FALSE)
+    
     if (comp == "equal") {
       # roundwork::round_up(col_val, dig) == p_rep
-      round(col_val + 1e-10, dig) == p_rep 
+      roundwork::round_up(col_val, dig) == p_rep
     } else {
       col_val < p_rep
     }
@@ -109,23 +111,36 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
   results_checked <- results_df %>%
     rowwise() %>%
     mutate(
-      valid_exact = !is.na(p_exact) && check_col(p_exact, p_reported, comparison, digits),
-      valid_corrected = check_col(p_asymp_corrected, p_reported, comparison, digits),
-      valid_uncorrected = check_col(p_asymp_uncorrected, p_reported, comparison, digits),
-      is_consistent = valid_exact | valid_corrected | valid_uncorrected
+      # Check Exact
+      valid_exact = check_col(p_exact, p_reported, comparison, digits),
+      
+      # Check No-Ties Scenarios (Only calculated for integers)
+      valid_corr_no_ties   = check_col(p_corr_no_ties, p_reported, comparison, digits),
+      valid_uncorr_no_ties = check_col(p_uncorr_no_ties, p_reported, comparison, digits),
+      
+      # Check Tied Scenarios (Calculated for everyone)
+      valid_corr_tied      = check_col(p_corr_tied, p_reported, comparison, digits),
+      valid_uncorr_tied    = check_col(p_uncorr_tied, p_reported, comparison, digits),
+      
+      # Overall Consistency: Match ANY of the 5
+      is_consistent = valid_exact | 
+        valid_corr_no_ties | valid_uncorr_no_ties | 
+        valid_corr_tied | valid_uncorr_tied
     ) %>%
     ungroup() %>%
+    # Filter for display (Diagnostic mode)
     filter(
       is_consistent | 
-        (p_asymp_uncorrected >= p_min_search & p_asymp_uncorrected <= p_max_search)
+        (p_corr_tied >= p_min_search & p_corr_tied <= p_max_search)
     )
   
   summary_df <- tibble(
     n1 = n1, n2 = n2, p_reported = p_reported,
     consistent = any(results_checked$is_consistent),
+    # Flags for diagnosis
     matches_exact = any(results_checked$valid_exact),
-    matches_r_corrected = any(results_checked$valid_corrected),
-    matches_spss_uncorrected = any(results_checked$valid_uncorrected)
+    matches_no_ties = any(results_checked$valid_corr_no_ties | results_checked$valid_uncorr_no_ties),
+    matches_ties = any(results_checked$valid_corr_tied | results_checked$valid_uncorr_tied)
   )
   
   return(list(summary = summary_df, details = results_checked))
