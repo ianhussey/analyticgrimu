@@ -101,7 +101,6 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
     if (is.na(col_val)) return(FALSE)
     
     if (comp == "equal") {
-      # roundwork::round_up(col_val, dig) == p_rep
       roundwork::round_up(col_val, dig) == p_rep
     } else {
       col_val < p_rep
