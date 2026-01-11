@@ -42,6 +42,8 @@ library(scales)
 library(knitr)
 library(kableExtra)
 
+source("../R/analytic_grimu.R")
+
 ```
 
 # True positive rate
@@ -129,8 +131,6 @@ reconstruct <- function(results,
 ## Run simulation
 
 ```{r}
-
-source("../R/grimu_refactored.R")
 
 if(file.exists("simulation.rds")){
   simulation <- read_rds("simulation.rds")
