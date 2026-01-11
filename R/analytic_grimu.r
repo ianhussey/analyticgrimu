@@ -69,16 +69,26 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
   # 1. Range Detection 
   if (is.null(p_min) || is.null(p_max)) {
     window <- 10^(-digits) * 5 
+    p_max_search <- p_reported + window
+    
+    # Calculate raw lower bound
+    raw_p_min <- p_reported - window
+    
     if (comparison == "less_than") {
-      p_max_search <- p_reported + window 
-      p_min_search <- 1e-7 # Safe non-zero lower bound
+      p_min_search <- NA_real_ # Flag to trigger U=0 anchor
+    } else if (raw_p_min <= 0) {
+      # If the window touches or goes below zero, we can't use qnorm.
+      # We flag this to anchor the U-search to 0 manually.
+      p_min_search <- NA_real_ 
     } else {
-      p_max_search <- p_reported + window
-      p_min_search <- max(1e-7, p_reported - window)
+      # Standard case: Window is strictly positive (e.g., 0.04 to 0.06)
+      p_min_search <- raw_p_min
     }
   } else {
     p_min_search <- p_min
     p_max_search <- p_max
+    # If user manually provides 0, treat it as NA for Z-score purposes
+    if (p_min_search <= 0) p_min_search <- NA_real_
   }
   
   # 2. U Bounds 
@@ -89,10 +99,21 @@ grimu_check <- function(n1, n2, p_reported, comparison = "equal", digits = 2,
   mu <- (n1 * n2) / 2
   
   # Z bounds to U bounds
-  z_bounds <- qnorm(1 - c(p_min_search, p_max_search) / 2)
-  u_deviation_max <- abs(z_bounds[1] * sigma_est)
-  u_start_est <- floor(mu - u_deviation_max - 2)
-  u_end_est   <- ceiling(mu + u_deviation_max + 2)
+  # Upper U bound (unchanged)
+  z_min <- qnorm(1 - p_max_search / 2)
+  u_dev_min <- abs(z_min * sigma_est)
+  u_end_est <- min(floor(mu), ceiling(mu - u_dev_min + 2)) 
+  
+  # Lower U bound 
+  if (is.na(p_min_search)) {
+    # If p_min was < 0 or "less_than", search the WHOLE tail down to 0.
+    u_start_est <- 0 
+  } else {
+    # Standard Z-based search
+    z_max <- qnorm(1 - p_min_search / 2)
+    u_dev_max <- abs(z_max * sigma_est)
+    u_start_est <- floor(mu - u_dev_max - 2)
+  }
   
   # 3. Call Updated Engine
   results_df <- grimu_map_pvalues(n1, n2, u_min = u_start_est, u_max = u_end_est)
