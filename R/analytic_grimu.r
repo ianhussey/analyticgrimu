@@ -110,6 +110,8 @@ grimu_check <- function(n1, n2, p_reported,
   }
   
   # --- 2. U Bounds ---
+  # We need the SE to estimate bounds, so we quickly calc it or grab from engine
+  # Calculating locally is faster than calling engine just for sigma
   N <- n1 + n2
   sigma_est <- sqrt((n1 * n2 * (N + 1)) / 12)
   mu <- (n1 * n2) / 2
