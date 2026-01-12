@@ -1,13 +1,28 @@
 library(tidyverse)
 library(roundwork)
 
-# U-value consistency checker
-check_u_consistency <- function(n1, n2, u_reported) {
+#' Check Consistency of Mann-Whitney U Statistic with Sample Sizes
+#'
+#' Verifies if a reported U statistic is mathematically possible given the group sample sizes.
+#' Checks two properties:
+#' 1. Bounds: U must be between 0 and n1 * n2.
+#' 2. Granularity: U must be an integer (no ties) or half-integer (with ties).
+#'
+#' @param n1 Integer. Sample size of group 1.
+#' @param n2 Integer. Sample size of group 2.
+#' @param u_reported Numeric. The reported U statistic to check.
+#'
+#' @return A single-row tibble containing:
+#'   \item{u_bounds_consistent}{Logical. TRUE if 0 <= U <= n1*n2.}
+#'   \item{u_granularity_consistent}{Logical. TRUE if U is an integer or half-integer.}
+#'   \item{u_possible}{Logical. TRUE if both checks pass.}
+#' @export
+#' check_u_consistency <- function(n1, n2, u_reported) {
   u_max <- n1 * n2
   
   # 1. Check Bounds
   # U cannot be negative or exceed n1*n2
-  in_bounds <- (u_reported >= 0) & (u_reported <= u_max)
+  in_bounds <- dplyr::between(u_reported, 0, u_max)
   
   # 2. Check Granularity (Integer or Half-Integer)
   # Multiplying by 2 should result in an integer (e.g., 20.5 * 2 = 41.0)
@@ -24,7 +39,33 @@ check_u_consistency <- function(n1, n2, u_reported) {
   return(res)
 }
 
-# core engine
+#' Generate Possible Mann-Whitney U P-values
+#'
+#' The core engine for GRIM-U. Generates a grid of valid U statistics (integers and half-integers)
+#' within a specified range and calculates the corresponding p-values using five different methods:
+#' 1. Exact Method (valid for integers only).
+#' 2. Asymptotic with Continuity Correction (No Ties variance).
+#' 3. Asymptotic uncorrected (No Ties variance).
+#' 4. Asymptotic with Continuity Correction (Ties variance).
+#' 5. Asymptotic uncorrected (Ties variance).
+#'
+#' @param n1 Integer. Sample size of group 1.
+#' @param n2 Integer. Sample size of group 2.
+#' @param u_min Numeric, optional. Lower bound for U search. Defaults to 0 or mean depending on `alternative`.
+#'   Will be snapped to the nearest half-integer.
+#' @param u_max Numeric, optional. Upper bound for U search. Defaults to mean or max depending on `alternative`.
+#'   Will be snapped to the nearest half-integer.
+#' @param alternative Character string. One of "two.sided", "less", or "greater". Defaults to "two.sided".
+#'
+#' @return A tibble where each row is a candidate U value, containing:
+#'   \item{U}{The U statistic (integer or half-integer).}
+#'   \item{is_integer}{Logical indicating if U is a whole number.}
+#'   \item{p_exact}{Exact p-value (NA for non-integers).}
+#'   \item{p_corr_no_ties}{Asymptotic p-value (continuity corrected, no ties).}
+#'   \item{p_uncorr_no_ties}{Asymptotic p-value (uncorrected, no ties).}
+#'   \item{p_corr_tied}{Asymptotic p-value (continuity corrected, ties).}
+#'   \item{p_uncorr_tied}{Asymptotic p-value (uncorrected, ties).}
+#' @export
 grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = "two.sided") {
   
   # Safety Check: Input Validation
@@ -140,12 +181,38 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
   return(results_df)
 }
 
-# forensic tool
+#' GRIM-U Forensic Consistency Check
+#'
+#' Checks the mathematical consistency of reported Mann-Whitney U test results.
+#' Performs a "Triangulation" check across Sample Sizes (N), Test Statistic (U), and P-value (P).
+#'
+#' 1. N <-> U: Is the reported U physically possible? (Bounds & Granularity).
+#' 2. N <-> P: Is the reported P mathematically possible? (Grid search of attainable p-values).
+#' 3. U <-> P: Does the specific reported U generate the reported P?
+#'
+#' @param n1 Integer. Sample size of group 1.
+#' @param n2 Integer. Sample size of group 2.
+#' @param u_reported Numeric, optional. The reported U statistic. If NA, checks P-value consistency only.
+#' @param p_reported Numeric. The reported p-value.
+#' @param comparison Character. "equal" (default) or "less_than" (for reported inequalities like "p < .05").
+#' @param digits Integer. The number of decimal places the p-value was reported to. Mandatory if p_reported is supplied.
+#' @param rounding Character vector, optional. Allowed rounding methods: "round", "trunc", "up".
+#'   If NULL, defaults to c("round", "trunc").
+#' @param p_min Numeric, optional. Manually override the lower bound of the p-value search window.
+#' @param p_max Numeric, optional. Manually override the upper bound of the p-value search window.
+#' @param alternative Character. One of "two.sided", "less", or "greater". Defaults to "two.sided".
+#'
+#' @return A list containing:
+#'   \item{summary}{A single-row tibble with the overall consistency verdict (`consistent`), component checks
+#'     (`u_bounds_consistent`, `u_matches_p`, `p_granularity_consistent`), and diagnostic flags.}
+#'   \item{details}{A tibble of all candidate U values found within the p-value search window,
+#'     showing which specific formula(s) matched the reported p-value.}
+#' @export
 grimu_check <- function(n1, n2, 
                         u_reported = NA_real_, 
-                        p_reported, 
                         comparison = "equal", 
-                        digits = 2, 
+                        p_reported, 
+                        digits, 
                         rounding = NULL, 
                         p_min = NULL, p_max = NULL, 
                         alternative = "two.sided") {
@@ -158,6 +225,12 @@ grimu_check <- function(n1, n2,
   is_whole <- function(x) !is.na(x) && abs(x - round(x)) < 1e-10
   if (!is_whole(n1) || !is_whole(n2)) {
     return(list(summary = tibble(n1=n1, n2=n2, consistent=NA, error="Non-integer N"), details=tibble()))
+  }
+  
+  if (!is.na(p_reported)) {
+    if (is.null(digits) || is.na(digits) || !is_whole(digits)) {
+      stop("If p_reported is supplied, digits must be supplied as an integer.")
+    }
   }
   
   if (!is.na(p_reported) & (p_reported < 0 || p_reported > 1)) stop("p_reported must be [0,1]")
@@ -340,11 +413,19 @@ grimu_check <- function(n1, n2,
     # Overall Verdict
     consistent = final_consistent,
     
+    # Bounds
+    p_range_min = if(is.na(p_min_search)) 0 else p_min_search,
+    p_range_max = p_max_search,
+    u_range_min = u_start_est,
+    u_range_max = u_end_est,
+    
     # Component Checks
     u_bounds_consistent = u_res$u_bounds_consistent,
     u_granularity_consistent = u_res$u_granularity_consistent,
     u_matches_p = u_consistent, # Does Reported U -> Reported P?
-    p_possible = p_consistent,  # Is Reported P possible at all?
+    
+    # NB No p_bounds_consistent as its tautological, p min and max are calculated from reported p
+    p_granularity_consistent = p_consistent,  # Is Reported P possible at all?
     
     # Debug Flags
     p_matches_exact = any(results_checked$valid_exact),
@@ -355,7 +436,21 @@ grimu_check <- function(n1, n2,
   return(list(summary = summary_df, details = results_checked))
 }
 
-# saturation calc
+#' Calculate P-Value Saturation (Granularity Density)
+#'
+#' Calculates the proportion of all possible rounded p-values (at a given precision) that are
+#' mathematically attainable by a Mann-Whitney U test with sample sizes n1 and n2.
+#' Used to estimate the False Positive Rate (FPR) of a GRIM-U check for a specific N.
+#'
+#' @param n1 Integer. Sample size of group 1.
+#' @param n2 Integer. Sample size of group 2.
+#' @param decimals Integer. The number of decimal places to test (e.g., 2 for p=0.04). Defaults to 3.
+#' @param p_lower_threshold Numeric. Lower bound of the p-value range to check (default 0).
+#' @param p_upper_threshold Numeric. Upper bound of the p-value range to check (default 1).
+#'
+#' @return A numeric value between 0 and 1 representing the saturation ratio:
+#'   (Unique attainable rounded p-values) / (Total possible bins in range).
+#' @export
 grimu_saturation <- function(n1, n2, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1) {
   
   # 1. CALL THE ENGINE 
