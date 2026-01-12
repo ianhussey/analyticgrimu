@@ -7,6 +7,7 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
   # Safety Check: Input Validation
   if (is.na(n1) || is.na(n2)) return(tibble(U = numeric(), is_integer = logical()))
   
+  comparison <- match.arg(comparison, c("equal","less_than"))
   alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
   N <- n1 + n2
   mu <- (n1 * n2) / 2
