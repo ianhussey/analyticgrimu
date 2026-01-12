@@ -142,7 +142,7 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
 
 # forensic tool
 grimu_check <- function(n1, n2, 
-                        u_reported,
+                        u_reported = NA_real_, 
                         p_reported, 
                         comparison = "equal", 
                         digits = 2, 
@@ -152,40 +152,33 @@ grimu_check <- function(n1, n2,
   
   alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
   
-  if (is.na(n1) || is.na(n2)) {
-    stop("n1 and n2 must be supplied")
-  }
+  # --- Fail-Fast Validation ---
+  if (is.na(n1) || is.na(n2)) stop("n1 and n2 must be supplied")
   
   is_whole <- function(x) !is.na(x) && abs(x - round(x)) < 1e-10
   if (!is_whole(n1) || !is_whole(n2)) {
-    stop("n1 and n2 must be integers")
+    return(list(summary = tibble(n1=n1, n2=n2, consistent=NA, error="Non-integer N"), details=tibble()))
   }
   
-  if (!is.na(p_reported) & (p_reported < 0 || p_reported > 1)) {
-    stop("p_reported must be between 0 and 1, or NA")
-  }
+  if (!is.na(p_reported) & (p_reported < 0 || p_reported > 1)) stop("p_reported must be [0,1]")
+  if (!is.numeric(u_reported)) stop("u_reported must be numeric or NA")
   
-  if (!is.numeric(u_reported) || is.na(u_reported)) {
-    stop("u_reported must be numeric or NA")
-  }
-  
-  # check U granularity and global range
+  # --- Step 1: Check Global U Validity ---
   if (!is.na(u_reported)) {
     u_res <- check_u_consistency(n1, n2, u_reported)
   } else {
     u_res <- tibble::tibble(
       u_bounds_consistent = NA,
-      u_granularity_consistent = NA
+      u_granularity_consistent = NA,
+      u_possible = NA
     )
   }
   
-  
-  # --- 1. Range Detection ---
+  # --- Step 2: Range Detection for P ---
   if (is.null(p_min) || is.null(p_max)) {
     # Default window for bounds search (wide enough to catch all rounding types)
     window <- 10^(-digits) * 5 
     p_max_search <- p_reported + window
-    
     # Calculate raw lower bound
     raw_p_min <- p_reported - window
     
@@ -203,7 +196,7 @@ grimu_check <- function(n1, n2,
     if (p_min_search <= 0) p_min_search <- NA_real_
   }
   
-  # --- 2. U Bounds Calculation ---
+  # --- Step 3: Bounds Calculation ---
   N <- n1 + n2
   mu <- (n1 * n2) / 2
   sigma_est <- sqrt((n1 * n2 * (N + 1)) / 12)
@@ -247,11 +240,11 @@ grimu_check <- function(n1, n2,
   u_start_est <- max(0, u_start_est)
   u_end_est   <- min(max_u, u_end_est)
   
-  # --- 3. Call Engine ---
+  # --- Step 4: Call Engine ---
   results_df <- grimu_map_pvalues(n1, n2, u_min = u_start_est, u_max = u_end_est, 
                                   alternative = alternative)
   
-  # --- 4. Consistency Logic (Interval Union) ---
+  # --- Step 5: Check P-Value Consistency ---
   if (is.null(rounding)) {
     methods <- c("round", "trunc") 
   } else {
@@ -310,21 +303,54 @@ grimu_check <- function(n1, n2,
                  . <= p_max_search)
     )
   
+  # --- Step 6: Triangulate U and P ---
+  
+  # A. Is P possible at all?
+  p_consistent <- any(results_checked$is_consistent)
+  
+  # B. Is the reported U consistent with the reported P?
+  # We check if u_reported appears in the rows where 'is_consistent' is TRUE.
+  if (!is.na(u_reported)) {
+    # We use a small epsilon for float comparison of U values
+    u_consistent <- results_checked %>%
+      filter(is_consistent) %>%
+      filter(abs(U - u_reported) < 1e-10) %>%
+      nrow() > 0
+  } else {
+    u_consistent <- NA
+  }
+  
+  # C. Overall Consistency
+  # If U is reported: Must be physically possible AND match P.
+  # If U is missing:  P must be possible.
+  final_consistent <- if (!is.na(u_reported)) {
+    isTRUE(u_res$u_possible) && isTRUE(u_consistent)
+  } else {
+    p_consistent
+  }
+  
   summary_df <- tibble(
     n1 = n1, 
     n2 = n2, 
+    u_reported = u_reported,
     p_reported = p_reported,
     alternative = alternative,
     rounding = paste(methods, collapse = "+"),
-    consistent = **TODO**, # if (u_bounds_consistent & u_granularity_consistent & u_consistent & p_consistent), where u_consistent & p_consistent are for the same row (ie correspond with one another)
+    
+    # Overall Verdict
+    consistent = final_consistent,
+    
+    # Component Checks
     u_bounds_consistent = u_res$u_bounds_consistent,
     u_granularity_consistent = u_res$u_granularity_consistent,
-    u_consistent = **TODO**, # if u_reported is among the possible u values, similar to how p is checked
-    p_consistent = any(results_checked$is_consistent),
+    u_matches_p = u_consistent, # Does Reported U -> Reported P?
+    p_possible = p_consistent,  # Is Reported P possible at all?
+    
+    # Debug Flags
     p_matches_exact = any(results_checked$valid_exact),
     p_matches_no_ties = any(results_checked$valid_corr_no_ties | results_checked$valid_uncorr_no_ties),
     p_matches_ties = any(results_checked$valid_corr_tied | results_checked$valid_uncorr_tied)
-  )  
+  )
   
   return(list(summary = summary_df, details = results_checked))
 }
