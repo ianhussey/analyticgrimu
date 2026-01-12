@@ -166,9 +166,21 @@ grimu_check <- function(n1, n2, p_reported,
   u_bound_1 <- mu + z_deep * sigma_est
   u_bound_2 <- mu + z_shallow * sigma_est
   
-  # Sort bounds (min to max) and pad slightly for safety
-  u_start_est <- floor(min(u_bound_1, u_bound_2) - 2)
-  u_end_est   <- ceiling(max(u_bound_1, u_bound_2) + 2)
+  # NA Safety: If bounds are NaN (e.g., extremely far out), default to full range
+  if (is.na(u_bound_1) || is.nan(u_bound_1)) u_bound_1 <- if(alternative=="greater") max_u else 0
+  if (is.na(u_bound_2) || is.nan(u_bound_2)) u_bound_2 <- if(alternative=="greater") mu else mu
+  
+  # Sort bounds
+  raw_start <- min(u_bound_1, u_bound_2)
+  raw_end   <- max(u_bound_1, u_bound_2)
+  
+  # Pad and Clamp
+  u_start_est <- floor(raw_start - 2)
+  u_end_est   <- ceiling(raw_end + 2)
+  
+  # Physical Clamping
+  u_start_est <- max(0, u_start_est)
+  u_end_est   <- min(max_u, u_end_est)
   
   # --- 3. Call Engine ---
   results_df <- grimu_map_pvalues(n1, n2, u_min = u_start_est, u_max = u_end_est, 
@@ -184,31 +196,28 @@ grimu_check <- function(n1, n2, p_reported,
   epsilon <- 10^(-digits)
   buffer <- 1e-14 
   
-  lower_limit <- Inf
-  upper_limit <- -Inf
-  
-  if ("round" %in% methods) {
-    lower_limit <- min(lower_limit, p_reported - 0.5 * epsilon)
-    upper_limit <- max(upper_limit, p_reported + 0.5 * epsilon)
+  is_match <- function(val) {
+    if (is.na(val)) return(FALSE)
+    if ("round" %in% methods) {
+      if (val >= (p_reported - 0.5 * epsilon - buffer) && 
+          val <  (p_reported + 0.5 * epsilon - buffer)) return(TRUE)
+    }
+    if ("trunc" %in% methods) {
+      if (val >= (p_reported - buffer) && 
+          val <  (p_reported + epsilon - buffer)) return(TRUE)
+    }
+    if ("up" %in% methods) {
+      if (val >  (p_reported - epsilon + buffer) && 
+          val <= (p_reported + buffer)) return(TRUE)
+    }
+    return(FALSE)
   }
-  if ("trunc" %in% methods) { 
-    lower_limit <- min(lower_limit, p_reported)
-    upper_limit <- max(upper_limit, p_reported + epsilon)
-  }
-  if ("up" %in% methods) { 
-    lower_limit <- min(lower_limit, p_reported - epsilon)
-    upper_limit <- max(upper_limit, p_reported)
-  }
-  
-  lower_limit <- lower_limit - buffer
-  upper_limit <- upper_limit + buffer
   
   check_col <- function(col_val) {
-    if (is.na(col_val)) return(FALSE)
     if (comparison == "equal") {
-      return(col_val >= lower_limit & col_val <= upper_limit)
+      return(is_match(col_val))
     } else {
-      return(col_val < p_reported)
+      return(!is.na(col_val) && col_val < p_reported)
     }
   }
   
