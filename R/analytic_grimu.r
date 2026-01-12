@@ -1,19 +1,24 @@
 library(tidyverse)
 library(roundwork)
 
+# U-value consistency checker
 check_u_consistency <- function(n1, n2, u_reported) {
   u_max <- n1 * n2
   
   # 1. Check Bounds
+  # U cannot be negative or exceed n1*n2
   in_bounds <- (u_reported >= 0) & (u_reported <= u_max)
   
   # 2. Check Granularity (Integer or Half-Integer)
-  # Multiplying by 2 should result in an integer
-  is_valid_granularity <- (u_reported * 2) %% 1 == 0
+  # Multiplying by 2 should result in an integer (e.g., 20.5 * 2 = 41.0)
+  # Using a small float tolerance for safety
+  val_doubled <- u_reported * 2
+  is_valid_granularity <- abs(val_doubled - round(val_doubled)) < 1e-10
   
   res <- tibble::tibble(
     u_bounds_consistent = in_bounds,
-    u_granularity_consistent = is_valid_granularity
+    u_granularity_consistent = is_valid_granularity,
+    u_possible = in_bounds & is_valid_granularity
   )
   
   return(res)
