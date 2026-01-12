@@ -80,7 +80,8 @@ analyze <- function(data,
                     m_digits,
                     sd_digits,
                     U_digits,
-                    p_digits) {
+                    p_digits,
+                    alternative) {
   
   res_summary <- data |>
     group_by(condition) |>
@@ -93,12 +94,13 @@ analyze <- function(data,
   
   test_result <- wilcox.test(score ~ condition, 
                              data = data, 
-                             alternative = "two.sided")
+                             alternative = alternative)
   
   res_utest <- tibble(
     U = test_result$statistic,  
     p = test_result$p.value,    
-    method = test_result$method 
+    method = test_result$method, 
+    alternative = alternative
   )
   
   res <- bind_cols(res_summary, 
@@ -109,6 +111,7 @@ analyze <- function(data,
            m2 = round_up(m2, m_digits),
            sd1 = round_up(sd1, sd_digits),
            sd2 = round_up(sd2, sd_digits),
+           alternative = alternative,
            U = round_up(U, U_digits),
            p = round_up(p, p_digits),
            p_operator = dplyr::if_else(dplyr::near(p, 0), "less_than", "equals"),
@@ -123,7 +126,8 @@ reconstruct <- function(results,
               n2 = results$n2, 
               p_reported = results$p, 
               comparison = "equal", 
-              digits = p_digits)$summary
+              digits = p_digits,
+              alternative = results$alternative)$summary
 }
 
 ```
@@ -147,6 +151,7 @@ if(file.exists("simulation.rds")){
     sd_digits = 2,
     U_digits = 2,
     p_digits = 3,
+    pop_alternative = c("two.sided", "less", "greater"),
     iteration = 1:1000
   ) |>
     mutate(pop_n2 = pop_n1)
@@ -174,7 +179,8 @@ if(file.exists("simulation.rds")){
                                                     m_digits = m_digits,
                                                     sd_digits = sd_digits,
                                                     U_digits = U_digits,
-                                                    p_digits = p_digits),
+                                                    p_digits = p_digits,
+                                                    alternative = pop_alternative),
                                           .f = analyze,
                                           .progress = TRUE,
                                           .options = furrr_options(seed = TRUE))) |>
@@ -214,7 +220,8 @@ By factorial, only cells with imperfect coverage
 
 simulation_coverage_by <- simulation |>
   group_by(pop_es = pop_m2, 
-           pop_n_per_group = pop_n1) |>
+           pop_n_per_group = pop_n1,
+           pop_alternative) |>
   summarize(
     coverage_p_recalc = mean(consistent)
   )
@@ -254,9 +261,9 @@ comparison_grid_d2 <- expand_grid(
     n2_unbal_extreme = ceiling(n_total * 0.8),
     
     # Calculate Saturation (3 decimal places)
-    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 2)),
-    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 2)),
-    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 2))
+    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 0.05))
   )
 
 comparison_grid_d2 %>%
@@ -300,9 +307,9 @@ comparison_grid_d3 <- expand_grid(
     n2_unbal_extreme = ceiling(n_total * 0.8),
     
     # Calculate Saturation (3 decimal places)
-    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 3)),
-    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 3)),
-    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 3))
+    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 0.05))
   )
 
 comparison_grid_d3 %>%
@@ -346,9 +353,9 @@ comparison_grid_d4 <- expand_grid(
     n2_unbal_extreme = ceiling(n_total * 0.8),
     
     # Calculate Saturation (3 decimal places)
-    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 4)),
-    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 4)),
-    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 4))
+    sat_balanced = map2_dbl(n1_bal, n2_bal, ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 0.05)),
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 0.05))
   )
 
 comparison_grid_d4 %>%
@@ -396,13 +403,13 @@ comparison_grid_d2_full <- expand_grid(
     # Calculate Saturation (4 decimal places, FULL range [0, 1])
     # We explicitly pass p_threshold = 1.0 to check the entire probability space
     sat_balanced = map2_dbl(n1_bal, n2_bal, 
-                           ~grimu_saturation(.x, .y, decimals = 2, p_threshold = 1.0)),
+                           ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, 
-                             ~grimu_saturation(.x, .y, decimals = 2, p_threshold = 1.0)),
+                             ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, 
-                                     ~grimu_saturation(.x, .y, decimals = 2, p_threshold = 1.0))
+                                     ~grimu_saturation(.x, .y, decimals = 2, p_lower_threshold = 0, p_upper_threshold = 1))
   )
 
 # --- Plotting ---
@@ -450,13 +457,13 @@ comparison_grid_d3_full <- expand_grid(
     # Calculate Saturation (4 decimal places, FULL range [0, 1])
     # We explicitly pass p_threshold = 1.0 to check the entire probability space
     sat_balanced = map2_dbl(n1_bal, n2_bal, 
-                           ~grimu_saturation(.x, .y, decimals = 3, p_threshold = 1.0)),
+                           ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, 
-                             ~grimu_saturation(.x, .y, decimals = 3, p_threshold = 1.0)),
+                             ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, 
-                                     ~grimu_saturation(.x, .y, decimals = 3, p_threshold = 1.0))
+                                     ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1))
   )
 
 # --- Plotting ---
@@ -504,13 +511,13 @@ comparison_grid_d4_full <- expand_grid(
     # Calculate Saturation (4 decimal places, FULL range [0, 1])
     # We explicitly pass p_threshold = 1.0 to check the entire probability space
     sat_balanced = map2_dbl(n1_bal, n2_bal, 
-                           ~grimu_saturation(.x, .y, decimals = 4, p_threshold = 1.0)),
+                           ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, 
-                             ~grimu_saturation(.x, .y, decimals = 4, p_threshold = 1.0)),
+                             ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 1)),
     
     sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, 
-                                     ~grimu_saturation(.x, .y, decimals = 4, p_threshold = 1.0))
+                                     ~grimu_saturation(.x, .y, decimals = 4, p_lower_threshold = 0, p_upper_threshold = 1))
   )
 
 # --- Plotting ---
@@ -528,6 +535,62 @@ comparison_grid_d4_full %>%
   labs(
     title = "The Forensic Power of GRIM-U (Full Range)",
     subtitle = "Proportion of ALL valid p-values (range 0 to 1, 4 decimals)\nthat are mathematically possible",
+    x = "Total Sample Size (N)",
+    y = "Saturation (FPR)"
+  ) +
+  theme_linedraw(base_size = 14)
+  
+```
+
+## Barely significant p values
+
+### Reported to 3 decimal places
+
+```{r}
+
+comparison_grid_d3_barely <- expand_grid(
+  n_total = seq(8, 100, by = 1)
+) %>%
+  mutate(
+    # Design 1: Balanced (approx 50/50)
+    n1_bal = floor(n_total * 0.5),
+    n2_bal = ceiling(n_total * 0.5),
+    
+    # Design 2: Unbalanced (approx 40/60)
+    n1_unbal = floor(n_total * 0.4),
+    n2_unbal = ceiling(n_total * 0.6),
+    
+    # Design 3: Extreme Unbalanced (approx 20/80)
+    n1_unbal_extreme = floor(n_total * 0.2),
+    n2_unbal_extreme = ceiling(n_total * 0.8),
+    
+    # Calculate Saturation (4 decimal places, FULL range [0, 1])
+    # We explicitly pass p_threshold = 1.0 to check the entire probability space
+    sat_balanced = map2_dbl(n1_bal, n2_bal, 
+                           ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0.02, p_upper_threshold = 0.05)),
+    
+    sat_unbalanced = map2_dbl(n1_unbal, n2_unbal, 
+                             ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0.02, p_upper_threshold = 0.05)),
+    
+    sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme, 
+                                     ~grimu_saturation(.x, .y, decimals = 3, p_lower_threshold = 0.02, p_upper_threshold = 0.05))
+  )
+
+# --- Plotting ---
+
+comparison_grid_d3_barely %>%
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") %>%
+  mutate(Design = recode(Design, 
+                         "sat_balanced" = "Balanced N (1:1 allocation)", 
+                         "sat_unbalanced" = "Unbalanced N (1:1.5 allocation)", 
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) %>%
+  ggplot(aes(x = n_total, y = Saturation, color = Design)) +
+  geom_line(linewidth = 1, alpha = 0.75) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "The Forensic Power of GRIM-U (Full Range)",
+    subtitle = "Proportion of ALL valid p-values (range 0 to 1, 3 decimals)\nthat are mathematically possible",
     x = "Total Sample Size (N)",
     y = "Saturation (FPR)"
   ) +
