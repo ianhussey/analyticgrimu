@@ -146,6 +146,7 @@ grimu_check <- function(n1, n2, p_reported,
   
   # Helper: Convert P to Z (Signed)
   p_to_z <- function(p, alt) {
+    p_safe <- min(1, max(0, p)) # clamp p to [0,1]
     if (is.na(p)) return(Inf) # Infinite Z implies maximal U deviation
     if (alt == "two.sided") return(qnorm(1 - p / 2)) # Always positive distance
     if (alt == "less")      return(qnorm(p))         # Negative Z
