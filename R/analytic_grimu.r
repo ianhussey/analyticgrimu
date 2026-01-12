@@ -1,6 +1,3 @@
-library(tidyverse)
-library(roundwork)
-
 #' Check Consistency of Mann-Whitney U Statistic with Sample Sizes
 #'
 #' Verifies if a reported U statistic is mathematically possible given the group sample sizes.
@@ -17,7 +14,7 @@ library(roundwork)
 #'   \item{u_granularity_consistent}{Logical. TRUE if U is an integer or half-integer.}
 #'   \item{u_possible}{Logical. TRUE if both checks pass.}
 #' @export
-#' check_u_consistency <- function(n1, n2, u_reported) {
+check_u_consistency <- function(n1, n2, u_reported) {
   u_max <- n1 * n2
   
   # 1. Check Bounds

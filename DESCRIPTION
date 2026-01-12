@@ -19,7 +19,7 @@ Imports:
     ggstance,
     scales,
     roundwork,
-    Purrr
+    purrr
 Suggests:
     devtools,
     roxygen2
