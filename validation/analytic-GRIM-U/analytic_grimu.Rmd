@@ -313,7 +313,7 @@ waldo::compare(df, df_fixed, max_diffs = Inf)
 
 ```{r fig.height=9, fig.width=9}
 
-source("../R/grim_u.R")
+source("grim_u.R")
 
 # run the analysis
 df_refactored <- grimu_analyze(n1 = 18, n2 = 60, p_min = 0.01, p_max = 0.10)
@@ -1011,15 +1011,11 @@ comparison_grid %>%
 
 # Analytic GRIMU
 
-```{r}
-
-source("../R/analytic_grimu.R")
-
-```
-
-usage 
+Reworked as an R package with many checks and bug fixes.
 
 ```{r}
+
+library(analyticgrimu) # devtools::install_github("ianhussey/analtyicgrimu")
 
 # consistent
 check1 <- grimu_check(n1 = 18, n2 = 60, u_reported = 710, p_reported = 0.04, digits = 2)
