@@ -33,9 +33,9 @@
 #'
 #' @examples
 #' \dontrun{
-#' plot_grimu_probability_multi(n1_vec = c(8, 30), n2_vec = c(9, 31))
+#' plot_grimu_probability(n1_vec = c(8, 30), n2_vec = c(9, 31))
 #' }
-plot_grimu_probability_multi <- function(n1_vec, n2_vec) {
+plot_grimu_probability <- function(n1_vec, n2_vec) {
   
   if (length(n1_vec) != length(n2_vec)) {
     stop("n1 and n2 vectors must be of equal length.")
@@ -114,6 +114,3 @@ plot_grimu_probability_multi <- function(n1_vec, n2_vec) {
   
   return(p_grid)
 }
-
-# Example Usage:
-plot_grimu_probability_multi(n1_vec = c(8, 30, 70), n2_vec = c(9, 31, 71))
