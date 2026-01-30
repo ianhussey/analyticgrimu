@@ -1,0 +1,442 @@
+---
+title: "plots"
+author: "Ian Hussey"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r include=FALSE}
+
+# formatting options
+# set default chunk options
+knitr::opts_chunk$set(message = FALSE, 
+                      warning = FALSE)
+
+# disable scientific notation
+options(scipen = 999) 
+
+```
+
+# Dependencies
+
+```{r}
+
+library(tidyverse)
+library(patchwork) 
+library(viridisLite)
+library(analyticgrimu)
+
+my_colors <- viridis(n = 2, begin = 0.3, end = 0.7)
+
+```
+
+# plot type 1
+
+## long
+
+NOTE THAT THIS IS ONLY FOR THE EXACT TEST WITH NO TIES, NOT FOR TIES OR ASYPTOTIC P VALUES
+
+```{r fig.height=8, fig.width=4}
+
+# --- 1. Generate All Permutations (The "Universe" of Possibilities) ---
+# We use N=3 vs N=3 because 20 combinations is perfect for a single slide/plot.
+n1 <- 3
+n2 <- 4
+N_total <- n1 + n2
+
+# Generate all possible rank positions for Group 1
+# combn returns a matrix where each column is a set of ranks for Group 1
+rank_combinations <- combn(1:N_total, n1, simplify = FALSE)
+
+# Process into a tidy format
+possibilities <- tibble(
+  perm_id = seq_along(rank_combinations),
+  ranks_g1 = rank_combinations
+) %>%
+  rowwise() %>%
+  mutate(
+    # Calculate U for Group 1: Sum(Ranks) - n(n+1)/2
+    sum_ranks = sum(ranks_g1),
+    U = sum_ranks - (n1 * (n1 + 1) / 2),
+    
+    # Calculate Exact P-value (Two-sided)
+    p_value = wilcox.test(x = ranks_g1, y = setdiff(1:N_total, ranks_g1))$p.value
+  ) %>%
+  ungroup() %>%
+  # Sort by U so the plot looks organized (Perfect separation -> Mixed)
+  arrange(U) %>%
+  mutate(perm_id = factor(perm_id, levels = perm_id)) |>
+  mutate(y_label = as.factor(row_number()))
+
+# Expand for the "Strip Plot" (Barcode view)
+# We need a row for every rank position (1 to 6) for every permutation
+plot_data <- possibilities %>%
+  mutate(
+    rank_pos = list(1:N_total),
+    # map2 returns a list naturally, which fits into the list-column
+    group_at_rank = map2(rank_pos, ranks_g1, ~ ifelse(.x %in% .y, "Group 1", "Group 2"))
+  ) %>%
+  unnest(cols = c(rank_pos, group_at_rank))
+
+# --- 2. Create the Visualizations ---
+
+# Plot A: The Permutations (Visualizing the "Ranks")
+p_ranks <- ggplot(plot_data, aes(x = rank_pos, y = y_label, fill = group_at_rank)) +
+  geom_tile(color = "white", width = 0.9, height = 0.8, alpha = 0.8) +
+  #scale_fill_manual(values = c("Group 1" = "#4477AA", "Group 2" = "#BBCC33")) +
+  scale_fill_manual(values = c("Group 1" = my_colors[1], "Group 2" = my_colors[2])) +
+  scale_x_continuous(breaks = 1:N_total, name = "Data (Rank Position)") +
+  labs(
+    title = "Granularity of U-test p values",
+    subtitle = paste0("With N=", n1, " vs N=", n2, " in the groups, there are exactly ", nrow(possibilities), "\npossible ways the data can be ranked with no ties."),
+    y = "Permutation (Sorted by U)",
+    fill = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    
+    # Strictly remove all grid lines
+    panel.grid = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    
+    # Remove axis ticks and lines for a cleaner look
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    
+    # # Keep X axis text, hide Y axis text
+    # axis.text.y = element_blank(),
+    legend.position = "bottom"
+  )
+
+# Plot B: The Granularity (Visualizing the U and P)
+# We highlight the discrete nature of U and P
+p_stats <- possibilities %>%
+  ggplot(aes(y = perm_id)) +
+  # Connect U and P visually
+  #geom_segment(aes(x = 0, xend = 1, y = perm_id, yend = perm_id), color = "white", linewidth = 5.5) +
+  
+  # # Plot the U value
+  # geom_text(aes(x = 0.2, label = paste0("U = ", U)), color = "gray30", fontface = "bold", size = 5) +
+  
+  # Plot the P value
+  # geom_label(aes(x = 0.8, label = sprintf("p = %.3f", p_value),
+  #                fill = factor(p_value)),
+  #            color = "white", size = 4.5, show.legend = FALSE) +
+  # 
+  # geom_label(aes(x = 0.2, label = paste0("U = ", U),
+  #                fill = factor(p_value)),
+  #            color = "white", size = 4.5, show.legend = FALSE) +
+  
+  # geom_label(aes(x = 0.5, 
+  #                label = sprintf("U = %s, p = %.3f", U, p_value), 
+  #                fill = factor(p_value)), 
+  #            color = "white", size = 4.5, fontface = "bold", show.legend = FALSE) +
+  
+  geom_text(aes(
+    x = 0.15, 
+    label = sprintf("U = %s, p = %s", U, sub("^0", "", sprintf("%.3f", p_value)))
+  ), 
+  size = 3, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  scale_fill_viridis_d(option = "magma", end = 0.8) +
+  scale_x_continuous(limits = c(0, 0.3), name = "Results") +
+  labs(
+    # title = "Results",
+    # subtitle = paste0("Only some U and p values are possible."),
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    #axis.title = element_blank(),  # Hides "Resulting Statistics" to match your void look
+    panel.border = element_blank()
+  )
+
+# Combine
+final_plot <- p_ranks + p_stats + 
+  plot_layout(widths = c(1, 1))
+
+
+final_plot
+
+```
+
+
+## wide
+
+```{r fig.height=5, fig.width=16}
+
+# --- 1. Generate Data (Unchanged) ---
+n1 <- 3
+n2 <- 4
+N_total <- n1 + n2
+rank_combinations <- combn(1:N_total, n1, simplify = FALSE)
+
+possibilities <- tibble(
+  perm_id = seq_along(rank_combinations),
+  ranks_g1 = rank_combinations
+) %>%
+  rowwise() %>%
+  mutate(
+    sum_ranks = sum(ranks_g1),
+    U = sum_ranks - (n1 * (n1 + 1) / 2),
+    p_value = wilcox.test(x = ranks_g1, y = setdiff(1:N_total, ranks_g1))$p.value
+  ) %>%
+  ungroup() %>%
+  arrange(U) %>%
+  mutate(perm_id = factor(perm_id, levels = perm_id))
+
+
+
+plot_data <- possibilities %>%
+  mutate(
+    rank_pos = list(1:N_total),
+    group_at_rank = map2(rank_pos, ranks_g1, ~ ifelse(.x %in% .y, "Group 1", "Group 2"))
+  ) %>%
+  unnest(cols = c(rank_pos, group_at_rank))
+
+# --- 2. Create the Visualizations (Corrected) ---
+
+# Plot A: The Permutations 
+# X = Permutation, Y = Rank Position
+p_ranks <- ggplot(plot_data, aes(x = perm_id, y = rank_pos, fill = group_at_rank)) +
+  geom_tile(color = "white", width = 0.9, height = 0.9, alpha = 0.8) +
+  scale_fill_manual(values = c("Group 1" = my_colors[1], "Group 2" = my_colors[2])) +
+  
+  # FIX: Rank position is now on the Y axis, so we use scale_y_continuous
+  scale_y_reverse(breaks = 1:N_total, name = "Data (Rank Position)") +
+  
+  labs(
+    title = "Granularity of Mann-Whitney U-test p values",
+    subtitle = paste0("With N=", n1, " in group 1 and N=", n2, " in group 2, there are ", nrow(possibilities), " possible permutations."),
+    x = NULL, # Hide X label to merge with bottom plot
+    fill = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    # We hide the X axis text because it will be shared with the bottom plot
+    axis.text.x = element_blank(),
+    legend.position = "right" 
+  ) 
+#coord_fixed(ratio = 1) 
+
+# Plot B: The Granularity
+# X = Permutation (Must match plot A)
+p_stats <- possibilities %>%
+  ggplot(aes(x = perm_id)) +
+  
+  # Stacked Labels
+  # geom_label(aes(
+  #   y = 0.25, 
+  #   fill = factor(p_value),
+  #   label = sprintf("%.3f", p_value)
+  # ), 
+  # color = "white", 
+  # size = 3.5, fontface = "bold", show.legend = FALSE) +
+  # 
+  # geom_label(aes(
+  #   y = 0.75, 
+  #   fill = factor(p_value),
+  #   label = U
+  # ), 
+  # color = "white", 
+  # size = 3.5, fontface = "bold", show.legend = FALSE) +
+  
+  geom_text(aes(
+    y = 0.25, 
+    label = sub("^0", "", sprintf("%.3f", p_value))
+  ), 
+  size = 3.5, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  geom_text(aes(
+    y = 0.75, 
+    label = U
+  ), 
+  size = 3.5, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  # scale_fill_viridis_d(option = "magma", end = 0.8) +
+  
+  # CHANGE 1: Define breaks at the exact heights of your labels (0.25 and 0.75)
+  # and assign the labels "p" and "U" to them.
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0.25, 0.75), 
+                     labels = c("p value", "U value")) +
+  labs(
+    title = NULL,
+    x = "Permutation (Sorted by U)",
+    y = "Results"
+  ) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank(),
+    
+    # # CHANGE 2: Enable the Y-axis text so "U" and "p" are visible
+    # axis.text.y = element_text(),
+    axis.text.x = element_blank(),
+    
+    axis.ticks = element_blank(),
+    panel.border = element_blank()
+  )
+
+# --- 3. Combine ---
+final_plot <- p_ranks / p_stats + 
+  plot_layout(heights = c(4, 1))
+
+print(final_plot)
+
+```
+
+# plot type 2
+
+## grimu style from u values, but fast
+
+```{r fig.height=8, fig.width=16}
+
+plot_grimu_probability_fast <- function(n1, n2) {
+  
+  # --- 1. Fast Generation (Using grimu_map_pvalues) ---
+  # Instead of combn() which explodes factorially, we use the property that 
+  # p-values are strictly determined by U. 
+  # We just need to generate p-values for every possible integer U from 0 to n1*n2/2.
+  # (Symmetric, so 0 to mean is sufficient to find all unique P values).
+  
+  max_u <- floor((n1 * n2) / 2)
+  
+  # Get all valid p-values using the fast engine
+  # We search the full range of U to capture every unique p-value
+  possible_p_data <- grimu_map_pvalues(n1, n2, u_min = 0, u_max = max_u)
+  
+  # Extract the exact p-values (integers only for exact test)
+  # If you want to include asymptotic approximations too, you can pivot_longer here.
+  # For this specific plot style (black/white validity), usually just 'p_exact' is desired.
+  valid_p_values <- possible_p_data %>%
+    filter(!is.na(p_exact)) %>%
+    pull(p_exact)
+  
+  # Round to 3 decimals to match the grid resolution
+  possible_values <- unique(round(valid_p_values, 3))
+  
+  # --- 2. Create the Grid (Vectorized) ---
+  # We can generate the grid coordinates mathematically without a slow mutate sequence
+  grid_data <- tibble(
+    val = seq(0, 0.999, by = 0.001)
+  ) %>%
+    mutate(
+      y_row = floor(val * 10), 
+      x_col = (val * 1000) %% 100,
+      # Check validity against our fast list
+      is_possible = round(val, 3) %in% possible_values
+    )
+  
+  # --- 3. Plot ---
+  p_grid <- ggplot(grid_data, aes(x = x_col, y = y_row, fill = is_possible)) +
+    geom_tile(color = "white", linewidth = 0.1) + 
+    
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "gray95")) +
+    
+    scale_y_reverse(
+      breaks = 0:9, 
+      labels = paste0("0.", 0:9), 
+      name = "First Decimal Place"
+    ) +
+    
+    scale_x_continuous(
+      breaks = seq(0, 99, by = 10),
+      labels = function(x) paste0(".0", x),
+      name = "Second & Third Decimals"
+    ) +
+    
+    labs(
+      title = "The P-Value Probability Space",
+      subtitle = paste0("Checking granularity at 3 decimal places (0.000 to 0.999)\n",
+                        "N=", n1, " vs N=", n2, " yields only ", length(possible_values), 
+                        " unique p-values (Black). All other values (Gray) are impossible."),
+      fill = "Mathematically\nPossible?"
+    ) +
+    
+    coord_fixed(ratio = 1) + 
+    
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      axis.ticks = element_blank(),
+      plot.title = element_text(face = "bold"),
+      plot.subtitle = element_text(color = "gray30"),
+      legend.position = "bottom"
+    )
+  
+  return(p_grid)
+}
+
+# Example Usage
+# This will now run instantly even for N=50 vs N=50
+plot_grimu_probability_fast(n1 = 10, n2 = 11)
+
+
+plot_grimu_probability_fast(n1 = 120, n2 = 121)
+
+# plot_grimu_probability_fast(n1 = 4, n2 = 5) /
+# plot_grimu_probability_fast(n1 = 10, n2 = 11) /
+# plot_grimu_probability_fast(n1 = 14, n2 = 15)
+
+
+# Generate the base plots
+p1 <- plot_grimu_probability_fast(n1 = 4, n2 = 5)
+p2 <- plot_grimu_probability_fast(n1 = 10, n2 = 11)
+p3 <- plot_grimu_probability_fast(n1 = 14, n2 = 15)
+
+# Apply the stripping rules
+p1_clean <- p1 + 
+  theme(legend.position = "none") +
+  labs(title = "The p value probability space", subtitle = "n1 = 4, n2 = 5")
+
+p2_clean <- p2 + 
+  theme(legend.position = "none") +
+  labs(title = NULL, subtitle = "n1 = 10, n2 = 11")
+
+p3_clean <- p3 + 
+  labs(title = NULL, subtitle = "n1 = 14, n2 = 15")
+
+# Combine using patchwork
+p1_clean / p2_clean / p3_clean
+
+
+```
+
+## facet wrapped
+
+```{r fig.height=8, fig.width=16}
+
+analyticgrimu::plot_grimu_probability(n1_vec = c(8), n2_vec = c(9))
+
+analyticgrimu::plot_grimu_probability(n1_vec = c(8, 30, 70), n2_vec = c(9, 31, 71))
+
+```
+
