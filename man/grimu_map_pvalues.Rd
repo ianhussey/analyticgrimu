@@ -29,20 +29,25 @@ Will be snapped to the nearest half-integer.}
 A tibble where each row is a candidate U value, containing:
 \item{U}{The U statistic (integer or half-integer).}
 \item{is_integer}{Logical indicating if U is a whole number.}
-\item{p_exact}{Exact p-value (NA for non-integers).}
-\item{p_corr_no_ties}{Asymptotic p-value (continuity corrected, no ties).}
-\item{p_uncorr_no_ties}{Asymptotic p-value (uncorrected, no ties).}
-\item{p_corr_tied}{Asymptotic p-value (continuity corrected, ties).}
-\item{p_uncorr_tied}{Asymptotic p-value (uncorrected, ties).}
+\item{p_exact}{Exact p-value, R/SciPy doubled-tail convention (NA for non-integers).}
+\item{p_exact_dev}{Exact p-value, SPSS Exact / StatXact deviation-from-mean convention
+(two-sided integer U only; NA otherwise).}
+\item{p_mid}{Mid-p value (integer U only; NA otherwise).}
+\item{p_corr_K{K}}{Asymptotic continuity-corrected p-value under tie-correction K. One column per achievable K.}
+\item{p_uncorr_K{K}}{Asymptotic uncorrected p-value under tie-correction K. One column per achievable K.}
 }
 \description{
 The core engine for GRIM-U. Generates a grid of valid U statistics (integers and half-integers)
-within a specified range and calculates the corresponding p-values using five different methods:
+within a specified range and calculates the corresponding p-values under every reporting
+convention the package models:
 \enumerate{
-\item Exact Method (valid for integers only).
-\item Asymptotic with Continuity Correction (No Ties variance).
-\item Asymptotic uncorrected (No Ties variance).
-\item Asymptotic with Continuity Correction (Ties variance).
-\item Asymptotic uncorrected (Ties variance).
+\item Exact (R / SciPy convention): doubled smaller tail using \code{pwilcox()}.
+\item Exact (SPSS Exact / StatXact convention): deviation-from-mean two-sided p,
+\verb{P(|W - mu_W| >= |w_obs - mu_W|)}. Two-sided integer U only.
+\item Mid-p: \code{P(W > w) + 0.5 * P(W = w)}. Integer U only.
+\item Asymptotic (corrected and uncorrected) under every achievable tie-correction K value
+via \code{achievable_K_values()}. K = 0 is the no-ties variance; K = 6 is one tied pair;
+larger K values cover multi-tie patterns. Columns are named \verb{p_corr_K\{value\}} and
+\verb{p_uncorr_K\{value\}}.
 }
 }

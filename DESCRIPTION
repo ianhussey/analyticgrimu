@@ -1,6 +1,6 @@
 Package: analyticgrimu
 Title: An implementation of Heathers and Grimes' (2025) GRIM-U, a granularity test for the results of Mann-Whitney U tests.
-Version: 0.1
+Version: 0.2
 Authors@R: c(
     person("Ian", "Hussey", , "Ian.hussey@unibe.ch", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0001-8906-7559"))
@@ -19,7 +19,8 @@ Imports:
     ggstance,
     scales,
     roundwork,
-    purrr
+    purrr,
+    partitions
 Suggests:
     devtools,
     roxygen2

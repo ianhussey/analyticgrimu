@@ -15,24 +15,32 @@
 #' @export
 grimu_saturation <- function(n1, n2, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1) {
   
-  # 1. CALL THE ENGINE 
+  # 1. CALL THE ENGINE
   # Get all U values from 0 to Mean (Sufficient because distribution is symmetric)
   # This covers every possible unique p-value the test can produce.
+  #
+  # Note: grimu_map_pvalues() now returns p-values under multiple methods
+  # (exact R/SciPy, exact SPSS/StatXact, mid-p) and under every achievable
+  # tie-correction K value (one (corr, uncorr) column pair per K). The
+  # pivot_longer + distinct(p_rounded) below correctly unions over all of
+  # those columns, so the saturation here reflects the full attainable
+  # p-value set across every reporting convention this package models.
   mu <- (n1 * n2) / 2
   p_space <- grimu_map_pvalues(n1, n2, u_min = 0, u_max = floor(mu))
   
-  # 2. Reshape and Filter
-  unique_rounded_p <- p_space %>%
-    pivot_longer(cols = starts_with("p_"), values_to = "p_val") %>%
-    filter(!is.na(p_val)) %>%
-    filter(p_val >= p_lower_threshold & p_val <= p_upper_threshold) %>%
-    # Round to target precision
-    mutate(p_rounded = roundwork::round_up(p_val, decimals)) %>%
-    distinct(p_rounded) %>%
-    nrow()
-  
+  # 2. Flatten all p_* columns into a single vector and reduce to unique
+  # rounded values. We avoid pivot_longer here because at large N the
+  # candidate tibble is ~thousands of U rows by ~hundreds of p_* columns,
+  # and pivoting that to long form was the dominant cost.
+  p_cols <- grep("^p_", names(p_space), value = TRUE)
+  p_vec  <- unlist(p_space[p_cols], use.names = FALSE)
+  p_vec  <- p_vec[!is.na(p_vec) &
+                    p_vec >= p_lower_threshold &
+                    p_vec <= p_upper_threshold]
+  unique_rounded_p <- length(unique(roundwork::round_up(p_vec, decimals)))
+
   # 3. Calculate Coverage
   total_slots <- length(seq(p_lower_threshold, p_upper_threshold, by = 10^-decimals))
-  
+
   return(unique_rounded_p / total_slots)
 }

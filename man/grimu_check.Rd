@@ -31,13 +31,19 @@ grimu_check(
 \item{digits}{Integer. The number of decimal places the p-value was reported to. Mandatory if p_reported is supplied.}
 
 \item{rounding}{Character vector, optional. Allowed rounding methods: "round", "trunc", "up".
-If NULL, defaults to c("round", "trunc").}
+If NULL, defaults to \code{c("round")}. The \code{"round"} window is symmetric (\verb{+/- 0.5 * 10^-digits})
+around \code{p_reported} and so covers both round-half-up and banker's rounding for any
+non-midpoint value (the two algorithms differ only at exact midpoints, which have
+measure zero for continuous p-values). \code{"trunc"} (floor to precision) and \code{"up"}
+(ceiling to precision) are available as opt-in options.}
 
 \item{p_min}{Numeric, optional. Manually override the lower bound of the p-value search window.}
 
 \item{p_max}{Numeric, optional. Manually override the upper bound of the p-value search window.}
 
-\item{alternative}{Character. One of "two.sided", "less", or "greater". Defaults to "two.sided".}
+\item{alternative}{Character. One of "two.sided", "less", or "greater". Defaults to "two.sided".
+For one-sided alternatives, both directions are enumerated and the consistency check is OR'd
+across them (see Description).}
 }
 \value{
 A list containing:
@@ -56,4 +62,33 @@ Performs a "Triangulation" check across Sample Sizes (N), Test Statistic (U), an
 \item N <-> P: Is the reported P mathematically possible? (Grid search of attainable p-values).
 \item U <-> P: Does the specific reported U generate the reported P?
 }
+
+The candidate p-value set checked at each U covers:
+\itemize{
+\item Exact p-value, R / SciPy doubled-tail convention (\code{p_exact}).
+\item Exact p-value, SPSS Exact / StatXact deviation-from-mean convention (\code{p_exact_dev}).
+\item Mid-p (\code{p_mid}).
+\item Asymptotic p-value (continuity-corrected and uncorrected) under every achievable
+tie-correction K = sum(t_i^3 - t_i) for tie-pattern partitions of size <= N.
+This covers no-ties (K = 0) and arbitrary multi-tie patterns, matching the
+tie-corrected variance used by R \code{wilcox.test()}, SPSS, Stata, and SciPy.
+}
+
+For one-sided alternatives the search is run for \emph{both} directions and the results
+are OR'd together. This is because which group is labelled "1" determines whether
+the reported one-sided p is the left- or right-tail value, and this labelling
+convention differs between R \code{wilcox.test()}, SPSS, and SciPy. Running both
+directions prevents a correctly-reported result from being rejected purely on
+opposite-labelling grounds. The supplied \code{alternative} argument is still used to
+shape the asymptotic deviation and continuity-correction signs.
+
+\strong{Caveat: exact permutation tests with ties.} Tools such as
+\code{coin::wilcox_test(distribution = "exact")}, SAS \verb{PROC NPAR1WAY EXACT}, StatXact,
+and the SPSS Exact Tests Add-on compute the exact permutation p-value
+\emph{conditional on the observed tie pattern}. That p-value is not reachable by any
+enumeration indexed only by sample sizes, because the partition is not recoverable
+from \verb{(n1, n2)}. An \code{inconsistent} verdict against a report from one of those tools
+may therefore reflect this method's coverage gap rather than a real inconsistency
+in the report. Users investigating a flagged result should check the source
+software before treating the flag as evidence of an error.
 }
