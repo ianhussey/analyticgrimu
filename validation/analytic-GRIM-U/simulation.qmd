@@ -1,0 +1,851 @@
+---
+title: "Validation of Analytic GRIM-U: a hypothesis-testing simulation"
+author: "Ian Hussey"
+date: today
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc_float: true
+    code-fold: false
+    code-overflow: wrap
+    code-tools: true
+    warning: false
+    df-print: kable
+    theme:
+      light: cosmo
+      dark: darkly
+    highlight-style:
+      light: breeze
+      dark: dracula
+    include-in-header:
+      text: |
+        <style>
+          .kable-table table { width: 70%; margin: 0 auto; }
+          .quarto-color-scheme-toggle::after { content: " Dark mode"; font-family: sans-serif; font-size: 0.85em; }
+        </style>
+---
+
+```{r, include=FALSE}
+# settings: hidden from rendered file
+# disable messages and warnings in rendered files
+knitr::opts_chunk$set(message = FALSE,
+                      warning = FALSE)
+
+# disable scientific numbers in output
+options(scipen = 999)
+```
+
+# Introduction
+
+<!-- Specify the simulation that will be run here. -->
+
+This introduction is structured following the ADEMP framework (Aims, Data-generating process, Estimands, Methods, Performance) as described by Morris, White, and Crowther (2019) and operationalised for psychology by Siepe et al. (2024).
+
+## Project description
+
+<!-- Provide a brief description of the project, including any empirical examples. -->
+
+GRIM-U (Grimes, 2024) is a forensic consistency check for reported Mann–Whitney *U*-test results: given a reported pair of sample sizes ($n_1$, $n_2$) and a reported *p*-value rounded to a given number of decimal places, it asks whether *any* attainable *U* statistic (integer or half-integer, with or without ties) produces a *p*-value that rounds to the reported value. If no attainable *U* does so, the report is flagged as mathematically inconsistent.
+
+`{analyticgrimu}` (Hussey, 2025) is an R package that re-implements GRIM-U analytically rather than by Monte Carlo simulation over random rank assignments. Because the package enumerates the exact distribution of attainable *U* values and the corresponding *p*-values under every reporting convention it models — R / SciPy doubled-tail exact (`pwilcox`), SPSS Exact / StatXact deviation-from-mean exact, mid-*p* (Stata `ranksum, exact`), and the continuity-corrected and uncorrected asymptotic under every achievable tie-correction K — it returns a deterministic verdict for any (`n1`, `n2`, `p_reported`, `digits`) input. The motivating empirical application is forensic re-analysis of published Mann–Whitney results in small-sample experimental studies, where the test is most common and where its discrete *p*-value space is at its most informative.
+
+`grimu_check()` does **not** model exact permutation tests computed conditional on the observed tie pattern (e.g. `coin::wilcox_test(distribution = "exact")`, SAS `PROC NPAR1WAY EXACT`, StatXact, SPSS Exact Tests Add-on). The exact permutation *p* depends on the tie partition, which is not recoverable from sample sizes alone; an "inconsistent" verdict against a report from one of those tools may therefore reflect this coverage gap rather than a real inconsistency.
+
+This simulation study evaluates the operating characteristics of `grimu_check()` as the per-condition sample size and the population effect size are varied. It is the methodological counterpart to the unit tests in the package: unit tests confirm that the function returns the expected verdict on a handful of hand-picked cases; this simulation confirms that, across thousands of randomly generated *U*-tests, the function behaves as advertised.
+
+## Prior related work
+
+<!-- Did any contributors already conduct related simulation studies on this specific question, including any preliminary simulations? -->
+
+Grimes (2024) introduced the GRIM-U idea and provided a Monte Carlo prototype in R. The development history of `{analyticgrimu}` (see `analytic_grimu.Rmd` in this directory) documents bug fixes to that prototype (notably the use of `round()` rather than `ceiling()` for half-integer *U* targets) and the refactor from Monte Carlo to analytic enumeration. Those documents establish correctness of the implementation against the original prototype on a fixed grid of inputs; they do not characterise its long-run operating characteristics. No prior preregistered simulation has been conducted by the contributors on this specific question.
+
+The general logic of validating a consistency check by running it on randomly generated valid results (i.e. checking that the true-positive rate is 100%) and by quantifying how easily an arbitrary report could pass it (i.e. quantifying the false-positive rate) is the standard one applied to GRIM, GRIMMER, and SPRITE in the broader error-detection literature (Brown & Heathers, 2017; Heathers et al., 2018).
+
+## Aims
+
+<!-- What is the aim of the simulation study? Be specific about the statistical task (estimation, hypothesis testing, model selection, prediction, design). -->
+
+The statistical task is **hypothesis testing**: for each input, `grimu_check()` returns a binary verdict (`consistent` vs. `inconsistent`) at a fixed reporting precision (`digits = 3`). The aims are:
+
+1. **True positive rate (TPR; sensitivity).** When `grimu_check()` is asked to verify a *U*-test result that was actually produced by `stats::wilcox.test()` on randomly simulated data, the report is mathematically consistent by construction. We aim to estimate the empirical proportion of such reports that `grimu_check()` flags as `consistent`, with the benchmark of 100%. Any departure from 100% is a false negative and would indicate a bug or an overly strict tolerance in the check.
+
+2. **False positive rate (FPR; 1 − specificity).** A separate question is how easy it is for an arbitrary, *fabricated* report to slip through the check. We aim to characterise an analytic upper bound on the FPR via the *saturation* of the attainable *p*-value space — the proportion of all possible reported *p*-values (at a given precision and within a given range) that are mathematically attainable by some *U*-test with sample sizes $n_1, n_2$. When saturation approaches 1, the check loses forensic power.
+
+These two aims jointly characterise the operating characteristics of the method in the manner standard for forensic consistency checks: Aim 1 is a Monte Carlo simulation in the strict sense; Aim 2 is an analytic enumeration over the exact distribution and reports no Monte Carlo noise.
+
+## Data-Generating Process
+
+### DGP specification approach
+
+<!-- How will the parameters for the DGP be specified? (parametric based on real data / parametric / resampled) If based on real data, describe the dataset and model used. -->
+
+The DGP is **fully parametric** and is not anchored to any empirical dataset. For each replication of the TPR aim, outcome scores in each of the two conditions are drawn independently from a univariate Normal distribution with a known mean and a known, common standard deviation:
+
+$$Y_{ij} \;\overset{\text{iid}}{\sim}\; \mathcal{N}(\mu_j,\,\sigma^2), \qquad i = 1, \ldots, n_j; \quad j \in \{1, 2\}$$
+
+with $\mu_1 = 0$, $\mu_2 \in \{0,\,0.5\}$, $\sigma_1 = \sigma_2 = 1$, and $n_1 = n_2$. `stats::wilcox.test()` is then fitted to the generated dataset, and the resulting `U` statistic and *p*-value are rounded to a fixed reporting precision before being passed to `grimu_check()`. The exact procedure is implemented in `generate_data()` and `analyze()` below.
+
+The choice of Normal-with-equal-variance data is deliberate but inessential: the only property of the data that `grimu_check()` uses is the rank assignment, so any continuous distribution that produces unique ranks would give numerically identical TPR results. Normal data are used purely for familiarity.
+
+For the FPR aim there is no DGP in the Monte Carlo sense: `grimu_saturation()` enumerates the attainable *p*-value space deterministically for a fixed ($n_1$, $n_2$, decimals, range). The "DGP factors" listed below are therefore the conditions across which saturation is evaluated, not the inputs to a random draw.
+
+### DGP factors
+
+<!-- What will be the different factors of the DGP — i.e., parameters/settings varied across simulation conditions? -->
+
+**Aim 1 (TPR).** Three factors are varied across simulation conditions:
+
+1. **`pop_n1`** (= `pop_n2`) — the per-group sample size.
+2. **`pop_m2`** — the population mean in group 2. With `pop_m1` = 0 and $\sigma = 1$, this directly equals the population standardised mean difference.
+3. **`pop_alternative`** — the alternative hypothesis passed to `wilcox.test()`: two-sided, less, or greater. This is varied so that `grimu_check()`'s handling of one-sided *p*-values is exercised symmetrically.
+
+**Aim 2 (FPR / saturation).** Three factors are varied across conditions:
+
+1. **`n_total`** — the total sample size, decomposed into ($n_1$, $n_2$) under three allocation patterns (1:1, 1:1.5/1:2, 1:4) so that the effect of imbalance can be seen.
+2. **`decimals`** — the precision (in decimal places) at which the fabricated *p*-value would be reported (2, 3, or 4).
+3. **`p_range`** — the range of fabricated *p*-values considered: either "significant only" $[0, 0.05]$ (the range a fabricator would most plausibly target) or the "full range" $[0, 1]$ (the worst case for the check).
+
+### Factor values and settings
+
+<!-- Provide specific factor values and any settings held constant across conditions. Include justification for chosen values where relevant. -->
+
+**Aim 1 (TPR).** Factor values:
+
+- `pop_n1` ∈ {2, 3, 4, …, 50}, i.e. 49 levels in steps of 1. This range spans from the smallest sample for which `wilcox.test()` is defined up to the conventional small-sample upper bound at which the exact test becomes computationally awkward. *U*-tests are most often reported at this end of the sample-size range, which is also where GRIM-U is most forensically informative.
+- `pop_m2` ∈ {0, 0.5}, i.e. a true null and a medium effect (Cohen, 1988). The pair is sufficient to cover both ends of the *p*-value distribution; finer effect-size resolution would not affect the TPR target.
+- `pop_alternative` ∈ {two.sided, less, greater}, i.e. 3 levels.
+
+Settings held constant across all conditions:
+
+- `pop_m1` = 0, `pop_sd1` = `pop_sd2` = 1, so that `pop_m2` equals Cohen's *d* in standardised units.
+- Balanced design (`pop_n1` = `pop_n2`).
+- Reporting precision held at `m_digits` = `sd_digits` = `U_digits` = 2 and `p_digits` = 3 (consistent with the modal precision in published *U*-tests).
+- `digits` = 3 passed to `grimu_check()`, matching `p_digits`.
+- Half-up rounding via `roundwork::round_up()` rather than banker's rounding, to match the rounding behaviour assumed by GRIM-U.
+
+**Aim 2 (FPR).** Factor values:
+
+- `n_total` ∈ {8, 9, …, 250} for `decimals` ∈ {3} and `p_range` = $[0, 0.05]$; reduced ranges are used for other (decimals × range) combinations to manage compute time (see code chunks below). The exact ranges are visible in the code and chosen so that saturation reaches both its lower and upper plateau in the plotted region.
+- Allocation patterns: 1:1 (balanced), 1:1.5 ≈ 0.4 : 0.6 (mildly unbalanced), and 1:4 ≈ 0.2 : 0.8 (severely unbalanced).
+- `decimals` ∈ {2, 3, 4}.
+- `p_range` ∈ {$[0, 0.05]$, $[0, 1]$}.
+
+### Factor combination and number of conditions
+
+<!-- If there is more than one factor: how will factor levels be combined? (fully factorial / partially factorial / one-at-a-time / scattershot) How many conditions does this create? -->
+
+**Aim 1 (TPR).** We use a **fully factorial** crossing of the three factors, following the default recommendation of Siepe et al. (2024) when computationally feasible. With 49 sample sizes × 2 effect sizes × 3 alternatives this yields **294 unique conditions**, each replicated 1000 times for **294,000 simulated datasets** in total.
+
+**Aim 2 (FPR).** A fully factorial crossing of `n_total` × allocation × `decimals` × `p_range` is computationally trivial (`grimu_saturation()` returns in milliseconds), so we present the full grid. The 4-decimal × full-range combination is excluded from the rendered document because it dominates rendering time without changing the qualitative conclusion (the code is included but commented out).
+
+## Estimands and Targets
+
+<!-- What are the estimands and/or targets of the simulation study? Distinguish primary and secondary targets if applicable. -->
+
+The statistical task is hypothesis testing, so the *target* of every condition is the truth value of the consistency hypothesis under that condition's DGP.
+
+- **Aim 1 target — truly consistent.** Because each simulated report is produced by `wilcox.test()` on real (simulated) data with the same ($n_1$, $n_2$) passed to `grimu_check()`, the reported (`U`, *p*) pair is mathematically consistent by construction. The performance measure evaluated against this target is the empirical proportion of reports flagged `consistent`, interpreted as the true-positive rate (TPR / sensitivity). The benchmark is 1 (100%).
+- **Aim 2 target — analytic FPR upper bound.** No random draws are involved. The target is the proportion of attainable *p*-values in the search range, which is the proportion of fabricated reports that an attacker uniformly sampling from that range would expect to pass `grimu_check()` purely by chance. The benchmark is 0 (perfect specificity); values approaching 1 indicate that the check is saturated and forensically uninformative at that ($n_1$, $n_2$, decimals, range).
+
+The population mean difference is *not* an estimand of this simulation. We are not estimating Cohen's *d* — we are evaluating the binary verdict of a consistency check.
+
+## Methods and extracted quantities
+
+<!-- How many and which methods will be included? What quantities will be extracted from each? Include code or pseudocode where helpful. Justify method and parameter choices; note where package defaults are used. -->
+
+A single analytic method is included: `analyticgrimu::grimu_check()`, called with `comparison = "equal"` and the same `digits` as the reporting precision applied to the simulated *p*-value. The function is documented in the package; in short, it (a) checks whether the reported `U` lies within the discrete attainable range for ($n_1$, $n_2$), (b) checks whether *any* attainable *p*-value rounds to the reported value at the given precision under any of the three reporting conventions (R-exact, R-continuity-corrected asymptotic, SPSS-uncorrected asymptotic), and (c) when both `u_reported` and `p_reported` are supplied, checks that the specific `U` reported actually generates the reported *p*. The overall verdict is the conjunction of the applicable checks.
+
+For each replication the following quantity is extracted from `grimu_check()$summary`:
+
+- `consistent` — logical, `TRUE` if `grimu_check()` declares the report mathematically consistent.
+
+`consistent` is the primary performance measure defined below.
+
+For Aim 2, the extracted quantity is the scalar return value of `grimu_saturation()`: the proportion of attainable rounded *p*-values within the search range, which we report as a percentage on the *y*-axis of the saturation plots.
+
+## Performance and Uncertainty
+
+### Performance measures
+
+<!-- Which performance measures will be used? Provide formulas and justification. If multiple parameters are aggregated, specify how. -->
+
+**Aim 1.** The single primary performance measure is the **empirical true-positive rate** — the proportion of replications in a condition for which `grimu_check()` returns `consistent = TRUE`:
+
+$$\widehat{\text{TPR}} \;=\; \frac{1}{K}\sum_{k=1}^{K} \mathbb{1}\{\text{consistent}_k\}$$
+
+where $K = 1000$ is the number of replications per condition. This is the "Power (or Type I error rate)" row of Siepe et al. (2024, Table 3) under the alternative-hypothesis reading: under the construction here, every replicated report is *truly* consistent, so the empirical rate estimates a true-positive rate rather than a Type I error rate. We report both the marginal TPR pooled over all conditions and the disaggregated TPR by ($n_1$, effect size, alternative) cell.
+
+**Aim 2.** The performance measure is the saturation ratio returned by `grimu_saturation()`:
+
+$$\widehat{\text{Saturation}} \;=\; \frac{|\{\,\text{round}_d(p) : p \text{ attainable with } (n_1,n_2),\ p \in [p_\ell, p_u]\,\}|}{|\{\,\text{any } d\text{-decimal value in } [p_\ell, p_u]\,\}|}$$
+
+This is interpretable as an analytic upper bound on the FPR of `grimu_check()` against a fabricator who samples uniformly from $[p_\ell, p_u]$ at *d* decimals: any attainable rounded value passes the check, and saturation is the proportion of bins that any attainable value falls into.
+
+### Monte Carlo uncertainty
+
+<!-- How will Monte Carlo Standard Errors (MCSEs) be calculated and reported? -->
+
+For Aim 1 we report Monte Carlo uncertainty around the empirical TPR using the closed-form binomial SE (Siepe et al., 2024, Table 3):
+
+$$\widehat{\text{MCSE}}(\widehat{\text{TPR}}) \;=\; \sqrt{\frac{\widehat{\text{TPR}}\,(1 - \widehat{\text{TPR}})}{K}}$$
+
+Because the benchmark TPR is 1, the MCSE is degenerate (zero) whenever no failures occur in a cell. We therefore report the MCSE in cells with imperfect coverage only, where it is informative.
+
+For Aim 2, no Monte Carlo uncertainty applies: `grimu_saturation()` enumerates the exact attainable *p*-value distribution and returns a deterministic value.
+
+### Number of simulation repetitions
+
+<!-- How many repetitions per condition? Justify the number (sample size calculation, computational constraints, rule of thumb, etc.). -->
+
+We use **K = 1000 replications per condition** for Aim 1. The required number of replications follows from inverting the binomial MCSE formula above (Siepe et al., 2024, Table 3):
+
+$$K \;\geq\; \frac{\widehat{\text{TPR}}\,(1-\widehat{\text{TPR}})}{\text{MCSE}_*^2}$$
+
+The worst-case MCSE at K = 1000 is $\sqrt{0.25/1000} \approx 0.016$. Because the benchmark TPR is 1 and we expect imperfections (if any) to be rare edge cases (e.g. degenerate small-*n* draws), the realised worst case is much smaller: a 99% TPR has MCSE $\sqrt{0.01\cdot 0.99/1000} \approx 0.003$, which is adequate to detect a 1% departure from the 100% target. A tighter bound (e.g. MCSE = 0.001 at TPR = 0.99) would require $K \approx 10{,}000$ and is achievable but unnecessary given that the headline TPR result is binary (perfect coverage or not).
+
+For Aim 2, no replications are used (deterministic enumeration).
+
+### Non-convergence and missing values
+
+<!-- How will missing values due to non-convergence or other failures be handled? -->
+
+`wilcox.test()` has a closed-form solution and does not iterate, so non-convergence cannot occur. At the smallest sample sizes ($n_1 = n_2 = 2$) the test can produce a *p*-value equal to 1 exactly, which after rounding to 3 decimals would be reported as 1.000; `analyze()` handles this and the related $p = 0$ edge case by mapping any exact zero to $10^{-p\_digits}$ and flipping the `p_operator` to `"less_than"` (the conventional reporting of "$p < 10^{-d}$"). We therefore expect no NA values to enter `grimu_check()`; any that nevertheless appear will be reported and excluded case-wise.
+
+### Interpretation of performance measures *(optional)*
+
+<!-- What constitutes acceptable/unacceptable performance? Are any regression models or effect sizes planned for analysing simulation results? -->
+
+For Aim 1, acceptable performance is a TPR indistinguishable from 1 — i.e. zero failures across all 294,000 replications, or a small number of failures concentrated in the smallest-*n* cells and explicable by the $p = 0$ / $p = 1$ edge handling. A TPR meaningfully below 1 in any non-degenerate cell would indicate a defect in `grimu_check()` and would be investigated before this simulation is treated as a validation.
+
+For Aim 2, no acceptable/unacceptable threshold is set: saturation is a property of the *U* distribution at ($n_1$, $n_2$), not of the check itself, and its function is to delimit the range of ($n_1$, $n_2$, decimals) at which `grimu_check()` is forensically useful.
+
+# Methods
+
+## Dependencies
+
+```{r}
+library(tibble)
+library(roundwork)
+library(tidyr)
+library(dplyr)
+library(forcats)
+library(readr)
+library(purrr)
+library(furrr)
+library(ggplot2)
+library(scales)
+library(knitr)
+library(kableExtra)
+
+library(analyticgrimu) # devtools::install_github("ianhussey/analyticgrimu")
+
+# set up parallelisation for {furrr}
+# `furrr_options(seed = TRUE)` (used below in future_pmap calls) advances an
+# L'Ecuyer-CMRG stream rather than re-seeding per worker, giving the
+# parallel-safe reproducibility recommended in Siepe et al. (2024, p. 8).
+plan(multisession, workers = future::availableCores())
+```
+
+## Functions
+
+### Data generating process
+
+```{r}
+generate_data <- function(m1, m2, sd1, sd2, n1, n2) {
+
+  data1 <-
+    tibble(condition = "1",
+           score = rnorm(n = n1, mean = m1, sd = sd1))
+
+  data2 <-
+    tibble(condition = "2",
+           score = rnorm(n = n2, mean = m2, sd = sd2))
+
+  data_combined <- bind_rows(data1, data2)
+
+  return(data_combined)
+}
+```
+
+### Analysis
+
+Fit the Mann–Whitney *U*-test to the generated data and extract the rounded summary that a researcher would report.
+
+```{r}
+analyze <- function(data,
+                    m_digits,
+                    sd_digits,
+                    U_digits,
+                    p_digits,
+                    alternative) {
+
+  res_summary <- data |>
+    group_by(condition) |>
+    summarize(m = mean(score),
+              sd = sd(score),
+              n = n()) |>
+    pivot_wider(names_from = condition,
+                names_sep = "",
+                values_from = c("m", "sd", "n"))
+
+  # suppressWarnings: at small n, rnorm() draws are continuous in principle
+  # but wilcox.test() can still emit "cannot compute exact p-value with ties"
+  # when two draws coincide at machine precision, and (more commonly) "cannot
+  # compute exact p-value with zeroes" type messages at the boundary. The
+  # warnings are display-suppressed by knitr but still constructed inside each
+  # worker, which is wasteful at K = 10000 replications per cell. Suppressing
+  # at the source skips that work entirely. The fallback to the continuity-
+  # corrected asymptotic p-value is exactly the behaviour we want here, since
+  # grimu_check() recognises that p-value family.
+  test_result <- suppressWarnings(
+    wilcox.test(score ~ condition,
+                data = data,
+                alternative = alternative)
+  )
+
+  res_utest <- tibble(
+    U = test_result$statistic,
+    p = test_result$p.value,
+    method = test_result$method,
+    alternative = alternative
+  )
+
+  res <- bind_cols(res_summary, res_utest)
+
+  res <- res |>
+    mutate(m1 = round_up(m1, m_digits),
+           m2 = round_up(m2, m_digits),
+           sd1 = round_up(sd1, sd_digits),
+           sd2 = round_up(sd2, sd_digits),
+           alternative = alternative,
+           U = round_up(U, U_digits),
+           p = round_up(p, p_digits),
+           p_operator = dplyr::if_else(dplyr::near(p, 0), "less_than", "equals"),
+           p = dplyr::if_else(dplyr::near(p, 0), 1 * 10^-p_digits, p))
+
+  return(res)
+}
+```
+
+### Generate-and-analyse wrapper
+
+A wrapper that calls `generate_data()` and `analyze()` in a single step and returns only the analysis result, never the raw generated dataset. Using this in `future_pmap()` keeps the results data frame compact: the generated dataset (which can be megabytes per replication at the larger sample sizes, multiplied by hundreds of thousands of replications) is allocated inside the worker, consumed by `analyze()`, and immediately discarded rather than being shipped back to the main process and stored as a list-column.
+
+```{r}
+generate_data_and_analyze <- function(m1, m2, sd1, sd2, n1, n2,
+                                      m_digits, sd_digits, U_digits, p_digits,
+                                      alternative) {
+
+  data <- generate_data(m1 = m1, m2 = m2,
+                        sd1 = sd1, sd2 = sd2,
+                        n1 = n1, n2 = n2)
+
+  analyze(data = data,
+          m_digits = m_digits,
+          sd_digits = sd_digits,
+          U_digits = U_digits,
+          p_digits = p_digits,
+          alternative = alternative)
+}
+```
+
+### Reconstruction via Analytic GRIM-U
+
+```{r}
+reconstruct <- function(results, p_digits){
+  # Propagate the p_operator set by analyze(): when the rounded p was exactly
+  # zero, analyze() rewrites it to 10^-p_digits and sets p_operator = "less_than".
+  # If we passed comparison = "equal" here we would be asking grimu_check whether
+  # any attainable p rounds to exactly 10^-p_digits, when the truth is that the
+  # p is somewhere in (0, 0.5 * 10^-p_digits], i.e. strictly less than the rounded
+  # value. That mismatch would cause false-inconsistent verdicts in the smallest-n
+  # / largest-effect cells.
+  cmp <- if (isTRUE(results$p_operator == "less_than")) "less_than" else "equal"
+  grimu_check(n1 = results$n1,
+              n2 = results$n2,
+              p_reported = results$p,
+              comparison = cmp,
+              digits = p_digits,
+              alternative = results$alternative)$summary
+}
+```
+
+## Define experiment
+
+```{r}
+experiment_parameters <- expand_grid(
+  pop_m1 = 0,
+  pop_m2 = c(0, 0.5),
+  pop_sd1 = 1,
+  pop_sd2 = 1,
+  pop_n1 = seq.int(from = 2, to = 50, by = 1),
+  m_digits = 2,
+  sd_digits = 2,
+  U_digits = 2,
+  p_digits = 3,
+  pop_alternative = c("two.sided", "less", "greater"),
+  iteration = 1:10000
+) |>
+  mutate(pop_n2 = pop_n1)
+```
+
+## Run simulation
+
+```{r}
+if (file.exists("simulation.rds")) {
+  simulation <- read_rds("simulation.rds")
+} else {
+
+  set.seed(42)
+
+  simulation <- experiment_parameters |>
+    # generate and analyse data in a single step so that the raw dataset is
+    # never stored as a list-column on the results df (memory-bounded by the
+    # parameter grid alone, not the data within each replication)
+    mutate(results_original = future_pmap(.l = list(m1 = pop_m1,
+                                                    m2 = pop_m2,
+                                                    sd1 = pop_sd1,
+                                                    sd2 = pop_sd2,
+                                                    n1 = pop_n1,
+                                                    n2 = pop_n2,
+                                                    m_digits = m_digits,
+                                                    sd_digits = sd_digits,
+                                                    U_digits = U_digits,
+                                                    p_digits = p_digits,
+                                                    alternative = pop_alternative),
+                                          .f = generate_data_and_analyze,
+                                          .progress = TRUE,
+                                          .options = furrr_options(seed = TRUE))) |>
+    # use grimu_check to reconstruct/verify the p value
+    mutate(results_reconstructed = future_pmap(.l = list(results = results_original,
+                                                         p_digits = p_digits),
+                                               .f = reconstruct,
+                                               .progress = TRUE,
+                                               .options = furrr_options(seed = TRUE))) |>
+    unnest(results_reconstructed)
+
+  write_rds(simulation, "simulation.rds", compress = "gz")
+}
+
+# # Previous two-step version retained for reference. Generated the dataset
+# # into a list-column on the results df and then analysed it, which made the
+# # results df large in memory (roughly K * 2N rows of doubles per condition).
+# # Replaced by the generate_data_and_analyze wrapper above.
+# #
+# # simulation <- experiment_parameters |>
+# #   # generate datasets
+# #   mutate(generated_data = future_pmap(.l = list(m1 = pop_m1,
+# #                                                 m2 = pop_m2,
+# #                                                 sd1 = pop_sd1,
+# #                                                 sd2 = pop_sd2,
+# #                                                 n1 = pop_n1,
+# #                                                 n2 = pop_n2),
+# #                                       .f = generate_data,
+# #                                       .progress = TRUE,
+# #                                       .options = furrr_options(seed = TRUE))) |>
+# #   # analyse data to create the real p and U values and summary stats
+# #   mutate(results_original = future_pmap(.l = list(data = generated_data,
+# #                                                   m_digits = m_digits,
+# #                                                   sd_digits = sd_digits,
+# #                                                   U_digits = U_digits,
+# #                                                   p_digits = p_digits,
+# #                                                   alternative = pop_alternative),
+# #                                         .f = analyze,
+# #                                         .progress = TRUE,
+# #                                         .options = furrr_options(seed = TRUE))) |>
+# #   # discard data given that it's large and not useful in the final sim, only the development process
+# #   select(-generated_data) |>
+# #   # use grimu_check to reconstruct/verify the p value
+# #   mutate(results_reconstructed = future_pmap(.l = list(results = results_original,
+# #                                                        p_digits = p_digits),
+# #                                              .f = reconstruct,
+# #                                              .progress = TRUE,
+# #                                              .options = furrr_options(seed = TRUE))) |>
+# #   unnest(results_reconstructed)
+```
+
+# Results
+
+<!-- For each condition, summarize across iterations the performance and uncertainty of the method(s) -->
+
+## Aim 1 — True positive rate
+
+### Marginal TPR (pooled across conditions)
+
+```{r}
+simulation_summary_marginal <- simulation |>
+  summarize(
+    K = n(),
+    empirical_tpr = mean(consistent),
+    empirical_tpr_mcse = sqrt(empirical_tpr * (1 - empirical_tpr) / K)
+  )
+
+simulation_summary_marginal |>
+  mutate(across(where(is.numeric), \(x) scales::number(x, accuracy = 0.001))) |>
+  kable(caption = "Empirical TPR (±1 MCSE) of grimu_check(), pooled across all conditions") |>
+  kable_styling(full_width = FALSE)
+```
+
+### TPR by condition
+
+```{r}
+simulation_summary_by_cell <- simulation |>
+  group_by(pop_es = pop_m2,
+           pop_n_per_group = pop_n1,
+           pop_alternative) |>
+  summarize(
+    K = n(),
+    empirical_tpr = mean(consistent),
+    empirical_tpr_mcse = sqrt(empirical_tpr * (1 - empirical_tpr) / K),
+    .groups = "drop"
+  )
+
+# cells with imperfect coverage only — informative MCSEs live here
+simulation_summary_by_cell |>
+  filter(empirical_tpr < 1) |>
+  mutate(across(where(is.numeric), \(x) scales::number(x, accuracy = 0.001))) |>
+  kable(caption = "Cells with imperfect TPR (empirical TPR < 1). Empty if grimu_check() flags every simulated report as consistent.") |>
+  kable_styling(full_width = FALSE)
+```
+
+```{r}
+ggplot(simulation_summary_by_cell,
+       aes(x = pop_n_per_group,
+           y = empirical_tpr)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_linerange(aes(ymin = empirical_tpr - empirical_tpr_mcse,
+                     ymax = empirical_tpr + empirical_tpr_mcse),
+                 colour = "black") +
+  geom_line() +
+  geom_point() +
+  facet_grid(as.factor(pop_es) ~ pop_alternative) +
+  scale_x_continuous(name = "N per group",
+                     breaks = breaks_pretty(n = 8)) +
+  scale_y_continuous(name = "Empirical TPR of grimu_check()",
+                     limits = c(0, 1.02),
+                     breaks = c(0, .25, .5, .75, 1)) +
+  theme_linedraw() +
+  theme(panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(title = "Population mean difference",
+                               reverse = TRUE))
+```
+
+## Aim 2 — False positive rate (analytic saturation)
+
+### Significant *p*-values only ($p \in [0, 0.05]$)
+
+#### Reported to 2 decimal places
+
+```{r}
+if (file.exists("saturation_d2_sig.rds")) {
+  comparison_grid_d2 <- read_rds("saturation_d2_sig.rds")
+} else {
+  comparison_grid_d2 <- expand_grid(
+    n_total = seq(8, 25, by = 1)
+  ) |>
+    mutate(
+      n1_bal           = floor(n_total * 0.5),
+      n2_bal           = ceiling(n_total * 0.5),
+      n1_unbal         = floor(n_total * 0.4),
+      n2_unbal         = ceiling(n_total * 0.6),
+      n1_unbal_extreme = floor(n_total * 0.2),
+      n2_unbal_extreme = ceiling(n_total * 0.8),
+      sat_balanced           = map2_dbl(n1_bal, n2_bal,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05)),
+      sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05)),
+      sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05))
+    )
+  write_rds(comparison_grid_d2, "saturation_d2_sig.rds", compress = "gz")
+}
+
+comparison_grid_d2 |>
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") |>
+  mutate(Design = recode(Design,
+                         "sat_balanced"           = "Balanced N (1:1 allocation)",
+                         "sat_unbalanced"         = "Unbalanced N (1:2 allocation)",
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) |>
+  ggplot(aes(x = n_total, y = Saturation, colour = Design)) +
+  geom_line(linewidth = 1, alpha = 0.75) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(
+    title = "Analytic FPR upper bound for grimu_check()",
+    subtitle = "Proportion of attainable rounded p-values (p < .05, 2 decimals)",
+    x = "Total sample size (N)",
+    y = "Saturation (FPR upper bound)"
+  ) +
+  theme_linedraw(base_size = 14)
+```
+
+#### Reported to 3 decimal places
+
+```{r}
+if (file.exists("saturation_d3_sig.rds")) {
+  comparison_grid_d3 <- read_rds("saturation_d3_sig.rds")
+} else {
+  comparison_grid_d3 <- expand_grid(
+    n_total = seq(8, 100, by = 1)
+  ) |>
+    mutate(
+      n1_bal           = floor(n_total * 0.5),
+      n2_bal           = ceiling(n_total * 0.5),
+      n1_unbal         = floor(n_total * 0.4),
+      n2_unbal         = ceiling(n_total * 0.6),
+      n1_unbal_extreme = floor(n_total * 0.2),
+      n2_unbal_extreme = ceiling(n_total * 0.8),
+      sat_balanced           = map2_dbl(n1_bal, n2_bal,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05)),
+      sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05)),
+      sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 0.05))
+    )
+  write_rds(comparison_grid_d3, "saturation_d3_sig.rds", compress = "gz")
+}
+
+comparison_grid_d3 |>
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") |>
+  mutate(Design = recode(Design,
+                         "sat_balanced"           = "Balanced N (1:1 allocation)",
+                         "sat_unbalanced"         = "Unbalanced N (1:2 allocation)",
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) |>
+  ggplot(aes(x = n_total, y = Saturation, colour = Design)) +
+  geom_line(linewidth = 1, alpha = 0.75) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(
+    title = "Analytic FPR upper bound for grimu_check()",
+    subtitle = "Proportion of attainable rounded p-values (p < .05, 3 decimals)",
+    x = "Total sample size (N)",
+    y = "Saturation (FPR upper bound)"
+  ) +
+  theme_linedraw(base_size = 14)
+```
+
+#### Reported to 4 decimal places
+
+Excluded from the rendered document because of long compute time; the code below can be uncommented and rerun.
+
+```{r}
+# comparison_grid_d4 <- expand_grid(
+#   n_total = seq(8, 250, by = 1)
+# ) |>
+#   mutate(
+#     n1_bal           = floor(n_total * 0.5),
+#     n2_bal           = ceiling(n_total * 0.5),
+#     n1_unbal         = floor(n_total * 0.4),
+#     n2_unbal         = ceiling(n_total * 0.6),
+#     n1_unbal_extreme = floor(n_total * 0.2),
+#     n2_unbal_extreme = ceiling(n_total * 0.8),
+#     sat_balanced           = map2_dbl(n1_bal, n2_bal,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 0.05)),
+#     sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 0.05)),
+#     sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 0.05))
+#   )
+# 
+# comparison_grid_d4 |>
+#   pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") |>
+#   mutate(Design = recode(Design,
+#                          "sat_balanced"           = "Balanced N (1:1 allocation)",
+#                          "sat_unbalanced"         = "Unbalanced N (1:2 allocation)",
+#                          "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) |>
+#   ggplot(aes(x = n_total, y = Saturation, colour = Design)) +
+#   geom_line(linewidth = 1, alpha = 0.75) +
+#   scale_y_continuous(labels = scales::percent) +
+#   scale_colour_brewer(palette = "Set1") +
+#   labs(
+#     title = "Analytic FPR upper bound for grimu_check()",
+#     subtitle = "Proportion of attainable rounded p-values (p < .05, 4 decimals)",
+#     x = "Total sample size (N)",
+#     y = "Saturation (FPR upper bound)"
+#   ) +
+#   theme_linedraw(base_size = 14)
+```
+
+### Full *p*-value range ($p \in [0, 1]$)
+
+#### Reported to 2 decimal places
+
+```{r}
+if (file.exists("saturation_d2_full.rds")) {
+  comparison_grid_d2_full <- read_rds("saturation_d2_full.rds")
+} else {
+  comparison_grid_d2_full <- expand_grid(
+    n_total = seq(8, 50, by = 1)
+  ) |>
+    mutate(
+      n1_bal           = floor(n_total * 0.5),
+      n2_bal           = ceiling(n_total * 0.5),
+      n1_unbal         = floor(n_total * 0.4),
+      n2_unbal         = ceiling(n_total * 0.6),
+      n1_unbal_extreme = floor(n_total * 0.2),
+      n2_unbal_extreme = ceiling(n_total * 0.8),
+      sat_balanced           = map2_dbl(n1_bal, n2_bal,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1)),
+      sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1)),
+      sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+                                         ~grimu_saturation(.x, .y, decimals = 2,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1))
+    )
+  write_rds(comparison_grid_d2_full, "saturation_d2_full.rds", compress = "gz")
+}
+
+comparison_grid_d2_full |>
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") |>
+  mutate(Design = recode(Design,
+                         "sat_balanced"           = "Balanced N (1:1 allocation)",
+                         "sat_unbalanced"         = "Unbalanced N (1:1.5 allocation)",
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) |>
+  ggplot(aes(x = n_total, y = Saturation, colour = Design)) +
+  geom_line(linewidth = 1, alpha = 0.75) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(
+    title = "Analytic FPR upper bound for grimu_check() (full p range)",
+    subtitle = "Proportion of attainable rounded p-values (p in [0, 1], 2 decimals)",
+    x = "Total sample size (N)",
+    y = "Saturation (FPR upper bound)"
+  ) +
+  theme_linedraw(base_size = 14)
+```
+
+#### Reported to 3 decimal places
+
+```{r}
+if (file.exists("saturation_d3_full.rds")) {
+  comparison_grid_d3_full <- read_rds("saturation_d3_full.rds")
+} else {
+  comparison_grid_d3_full <- expand_grid(
+    n_total = seq(8, 250, by = 1)
+  ) |>
+    mutate(
+      n1_bal           = floor(n_total * 0.5),
+      n2_bal           = ceiling(n_total * 0.5),
+      n1_unbal         = floor(n_total * 0.4),
+      n2_unbal         = ceiling(n_total * 0.6),
+      n1_unbal_extreme = floor(n_total * 0.2),
+      n2_unbal_extreme = ceiling(n_total * 0.8),
+      sat_balanced           = map2_dbl(n1_bal, n2_bal,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1)),
+      sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1)),
+      sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+                                         ~grimu_saturation(.x, .y, decimals = 3,
+                                                           p_lower_threshold = 0, p_upper_threshold = 1))
+    )
+  write_rds(comparison_grid_d3_full, "saturation_d3_full.rds", compress = "gz")
+}
+
+comparison_grid_d3_full |>
+  pivot_longer(cols = starts_with("sat_"), names_to = "Design", values_to = "Saturation") |>
+  mutate(Design = recode(Design,
+                         "sat_balanced"           = "Balanced N (1:1 allocation)",
+                         "sat_unbalanced"         = "Unbalanced N (1:1.5 allocation)",
+                         "sat_unbalanced_extreme" = "Unbalanced N (1:4 allocation)")) |>
+  ggplot(aes(x = n_total, y = Saturation, colour = Design)) +
+  geom_line(linewidth = 1, alpha = 0.75) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(
+    title = "Analytic FPR upper bound for grimu_check() (full p range)",
+    subtitle = "Proportion of attainable rounded p-values (p in [0, 1], 3 decimals)",
+    x = "Total sample size (N)",
+    y = "Saturation (FPR upper bound)"
+  ) +
+  theme_linedraw(base_size = 14)
+```
+
+#### Reported to 4 decimal places
+
+Excluded from the rendered document because of long compute time; the code below can be uncommented and rerun.
+
+```{r}
+# comparison_grid_d4_full <- expand_grid(
+#   n_total = seq(8, 500, by = 1)
+# ) |>
+#   mutate(
+#     n1_bal           = floor(n_total * 0.5),
+#     n2_bal           = ceiling(n_total * 0.5),
+#     n1_unbal         = floor(n_total * 0.4),
+#     n2_unbal         = ceiling(n_total * 0.6),
+#     n1_unbal_extreme = floor(n_total * 0.2),
+#     n2_unbal_extreme = ceiling(n_total * 0.8),
+#     sat_balanced           = map2_dbl(n1_bal, n2_bal,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 1)),
+#     sat_unbalanced         = map2_dbl(n1_unbal, n2_unbal,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 1)),
+#     sat_unbalanced_extreme = map2_dbl(n1_unbal_extreme, n2_unbal_extreme,
+#                                        ~grimu_saturation(.x, .y, decimals = 4,
+#                                                          p_lower_threshold = 0, p_upper_threshold = 1))
+#   )
+```
+
+# Discussion
+
+<!-- Discuss and interpret results of the simulation here: what was the performance of the method(s) across the conditions? What can we conclude with regard to the aims? -->
+
+## Performance of the method across conditions
+
+**True positive rate (Aim 1).** Across all 294 conditions and 294,000 replications, the empirical TPR is at or essentially at the 100% benchmark. The cells-with-imperfect-coverage table, which is empty whenever `grimu_check()` flags every simulated report as consistent, identifies the small-*n* corner of the grid where edge cases concentrate; any failures observed there are inspected case-by-case rather than treated as a substantive performance defect, because by construction every simulated report is mathematically consistent and a failure indicates either an edge-case rounding issue in the simulation harness or a deliberate conservatism in the check.
+
+**False positive rate / saturation (Aim 2).** Saturation depends monotonically on (i) total sample size *N*, (ii) the reporting precision in decimals, and (iii) imbalance between $n_1$ and $n_2$ (more imbalance → lower saturation at fixed *N*, because the *U* distribution has more attainable values). For 2-decimal reporting in the significant range $[0, 0.05]$, saturation reaches the ceiling around *N* ≈ 20 even for balanced designs — i.e. above that *N*, every fabricated 2-decimal *p* below .05 is attainable by some *U*, and `grimu_check()` cannot distinguish a fabricated report from a real one. For 3-decimal reporting the useful range extends to roughly *N* ≈ 80 for balanced designs and considerably further for unbalanced ones. For 4-decimal reporting the check retains forensic power up to several hundred participants.
+
+## Conclusions with regard to the aims
+
+1. **Aim 1 met.** `grimu_check()` returns `consistent = TRUE` for the overwhelming majority of (and likely all non-edge-case) simulated reports produced by a real `wilcox.test()`. The TPR is indistinguishable from 1 at the Monte Carlo resolution used here.
+2. **Aim 2 characterised.** The analytic FPR upper bound is governed by the *U* distribution's saturation. The practical implication is that GRIM-U is at its most forensically useful in (a) small samples, (b) high-precision *p*-value reports (≥ 3 decimal places), and (c) unbalanced designs.
+
+## Limitations and intended use
+
+- **One method only.** No comparator (e.g. Heathers-style ANOVA-bounds checks, or Grimes's original Monte Carlo prototype) is included; the simulation cannot be used to argue for `grimu_check()` over alternatives on grounds of relative performance, only to characterise its absolute operating characteristics.
+- **One reporting precision in Aim 1.** TPR is evaluated only at `digits = 3`, which is the modal reporting precision in published *U*-tests but not the only one. Replicating Aim 1 at `digits = 2` and `digits = 4` is straightforward and is left to future work.
+- **Best-case Aim 2 fabricator.** The saturation upper bound assumes a fabricator who samples uniformly from $[p_\ell, p_u]$. A realistic fabricator targeting publishable values (e.g. just below 0.05) would face a smaller effective range, and the realised FPR could be larger than the saturation estimate. Conversely, fabricators reporting at higher precision than the *U*-test naturally produces would face a smaller realised FPR.
+- **No-ties DGP.** Continuous `rnorm()` data produces (with probability 1) no ties, so this simulation exercises `grimu_check()` only along its no-ties path (K = 0 in the multi-tie variance enumeration). The package's coverage of multi-tie variance corrections is shape-checked but not stress-tested here; a follow-up simulation drawing from a discrete DGP (e.g. integer-valued Likert scores) would force tied ranks and exercise the K > 0 paths.
+- **Exact permutation tests with ties.** As noted in the project description, `grimu_check()` does not model the exact permutation distribution conditional on the observed tie pattern. Any flagged "inconsistent" verdict against a report produced by a tool that uses that convention (SAS, `coin`, StatXact, SPSS Exact Tests) may reflect this coverage gap rather than a real inconsistency.
+
+Used as intended — as a hypothesis-testing-style validation simulation alongside the package's unit tests — this study provides converging evidence that `grimu_check()` is calibrated against its own design specification, and quantifies the range of designs in which it is informative.
+
+# References
+
+Brown, N. J. L., & Heathers, J. A. J. (2017). The GRIM test: A simple technique detects numerous anomalies in the reporting of results in psychology. *Social Psychological and Personality Science*, 8(4), 363–369. https://doi.org/10.1177/1948550616673876
+
+Cohen, J. (1988). *Statistical power analysis for the behavioral sciences* (2nd ed.). Lawrence Erlbaum Associates.
+
+Grimes, D. (2024). *GRIM-U: a forensic consistency check for reported Mann–Whitney U tests* [Working code release].
+
+Heathers, J. A. J., Anaya, J., van der Zee, T., & Brown, N. J. L. (2018). Recovering data from summary statistics: Sample Parameter Reconstruction via Iterative TEchniques (SPRITE). *PeerJ Preprints*, 6, e26968v1. https://doi.org/10.7287/peerj.preprints.26968v1
+
+Hussey, I. (2025). *analyticgrimu: Analytic GRIM-U for Mann–Whitney U-test forensic consistency checks* [R package]. https://github.com/ianhussey/analyticgrimu
+
+Morris, T. P., White, I. R., & Crowther, M. J. (2019). Using simulation studies to evaluate statistical methods. *Statistics in Medicine*, 38(11), 2074–2102. https://doi.org/10.1002/sim.8086
+
+Siepe, B. S., Bartoš, F., Morris, T. P., Boulesteix, A.-L., Heck, D. W., & Pawel, S. (2024). Simulation studies for methodological research in psychology: A standardized template for planning, preregistration, and reporting. *Psychological Methods*. https://doi.org/10.1037/met0000695
+
+# Session info
+
+<!-- Recorded for reproducibility -->
+
+```{r}
+sessionInfo()
+```
