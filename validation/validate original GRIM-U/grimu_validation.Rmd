@@ -279,6 +279,75 @@ waldo::compare(df, df_fixed)
 
 ```
 
-- this changes p_exact and p_exact values by up to c. .003, and affects a large proportion of cases. 
+- this changes p_exact and p_exact values by up to c. .003, and affects a large proportion of cases.
 
+# Other issues found in Grimes' code
 
+In the process of building `{analyticgrimu}` I noticed a handful of further issues in `grim_u.r`. Each is recorded below for the record; the analytic engine in `{analyticgrimu}` (see `R/grimu_map_pvalues.R`) supersedes Grimes' tie/asymptotic handling on every one of these axes.
+
+## Issue: tie-corrected variance uses the constant 7 where the correct value is 6
+
+In `grim_u.r` the tie-corrected SE is computed as:
+
+```r
+seu_tie <- sqrt(n1 * n2 * (n1 + n2 + 1) / 12 -
+                  n1 * n2 * (7) / (12 * (n1 + n2) * (n1 + n2 - 1)))
+```
+
+The standard tie-correction in the Mann–Whitney variance is $\sum_i (t_i^3 - t_i)$ summed over tie groups, where $t_i$ is the size of the $i$-th tie group:
+
+$$\sigma^2 \;=\; \frac{n_1 n_2}{12}\left((N+1) \;-\; \frac{\sum_i (t_i^3 - t_i)}{N(N-1)}\right)$$
+
+For one tied pair (the only tie pattern Grimes' code injects; see the next issue), $t = 2$ gives $\sum (t^3 - t) = 2^3 - 2 = 6$, not 7. Moreover, no tie partition can ever produce 7, because $t^3 - t = t(t-1)(t+1)$ is always divisible by 6 (three consecutive integers always include a multiple of 2 and a multiple of 3). The constant 7 in `seu_tie` is therefore an off-by-one bug/typo: the formula sits half-way between the no-tie correction (0) and the smallest achievable correction (6).
+
+```{r}
+# t^3 - t for t = 2, 3, 4, 5, 6, 7 — none equals 7
+t <- 2:7
+data.frame(t = t, "t_cubed_minus_t" = t^3 - t)
+```
+
+`{analyticgrimu}` corrects this by enumerating all achievable values of $\sum (t_i^3 - t_i)$ via `achievable_K_values()`, and 6 (rather than 7) is the second entry in that sequence.
+
+## Issue: at most one tied pair is ever injected
+
+The tie-injection block in `grim_u.r` finds *one* place where two consecutive ranks differ by 2 and rewrites both ranks to a shared half-integer value:
+
+```r
+w <- which(diff(j$group2_ranks) == 2)[1]
+if (!is.na(w)) {
+  mv <- j$group2_ranks[w]
+  j$group2_ranks[w] <- mv + 0.5
+  w2 <- which(j$group1_ranks == mv + 1)
+  if (length(w2) > 0) {
+    j$group1_ranks[w2] <- mv + 0.5
+  }
+}
+```
+
+This corresponds to exactly one $t = 2$ tied pair, and only when the simulated rank pattern has a suitable adjacent gap. Real data routinely contains *multi-pair* tie patterns (e.g. two or more separate pairs), *larger* tie groups ($t = 3, 4, \ldots$), and combinations thereof, each of which yields a different $\sum (t_i^3 - t_i)$ and therefore a different $\sigma$ and asymptotic $p$. None of these are modelled in `grim_u.r`.
+
+`{analyticgrimu}::grimu_map_pvalues()` enumerates the full family of achievable K values for partitions with parts ≥ 2 and sum ≤ min(N, 15), producing one (corrected, uncorrected) asymptotic $p$-value column per K. This is the family of values reachable by R `wilcox.test()`, SPSS, Stata, and SciPy when they apply their tie correction to arbitrary tie patterns.
+
+## Issue: only one asymptotic convention is modelled
+
+Grimes' simulation runs:
+
+```r
+m2 <- wilcox.test(j$group1_ranks, j$group2_ranks, correct = FALSE, exact = FALSE)
+```
+
+with `correct = FALSE`, which is the SPSS-style uncorrected asymptotic. R's default (`correct = TRUE`) applies a continuity correction; SAS, StatXact, and the SPSS Exact Tests add-on additionally use the deviation-from-mean exact convention $P(|W - \mu_W| \geq |w_\text{obs} - \mu_W|)$; Stata's `ranksum, exact` reports a mid-*p*. A reported $p$ produced by any of these conventions would not match Grimes' single asymptotic column and would therefore be incorrectly flagged inconsistent.
+
+`{analyticgrimu}` models all four of these conventions (`p_corr_K{K}`, `p_uncorr_K{K}`, `p_exact_dev`, `p_mid`) alongside R's exact (`p_exact`).
+
+## Issue: two-sided only
+
+`grim_u.r` calls `wilcox.test()` without specifying an `alternative`, so every comparison is two-sided. One-sided reports cannot be checked against Grimes' candidate set, and the question of which group is labelled "1" (R vs SPSS vs SciPy convention) is not addressed.
+
+`{analyticgrimu}::grimu_check()` accepts `alternative ∈ {"two.sided", "less", "greater"}` and, for the one-sided cases, enumerates both directions and OR's the resulting consistency checks, so that an opposite-labelling report still passes.
+
+## Issue: non-deterministic Monte Carlo backend
+
+Grimes' `simrank()` (and the `simrank_optimised()` variant in the Jan 2025 update of `grim_u.r`) explores random combinations of ranks until one matches the target rank sum. Without successive approximation, an "inconsistent" verdict at the end of `max_iter` iterations has to be interpreted as "the reported $p$ is impossible OR we didn't sample long enough to find it". This undermines the forensic interpretation of the test.
+
+`{analyticgrimu}` is fully analytic: there is no Monte Carlo step, so an "inconsistent" verdict means *no candidate exists*, period (subject to the tie-pattern and asymptotic-convention coverage above).
