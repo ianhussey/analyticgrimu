@@ -1,0 +1,397 @@
+---
+title: "Analytic GRIM-U: A granularity consistency test for Mann-Whitney U-test *p* values"
+author: "Authors: TBD"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r include=FALSE}
+
+# formatting options
+# set default chunk options
+knitr::opts_chunk$set(message = FALSE, 
+                      warning = FALSE)
+
+# disable scientific notation
+options(scipen = 999) 
+
+```
+
+```{r}
+
+library(tidyverse)
+library(patchwork) 
+library(viridisLite)
+library(analyticgrimu)
+
+my_colors <- viridis(n = 2, begin = 0.3, end = 0.7)
+
+```
+
+# Methodological Description 
+
+The Analytic GRIM-U Test
+
+The Granularity-Related Inconsistency of Mann-Whitney U (GRIM-U) test evaluates the mathematical consistency between reported sample sizes ($n_1, n_2$), the test statistic ($U$), and the reported $p$-value ($p_{rep}$).
+
+The method relies on the property that the Mann-Whitney $U$ statistic is discrete (granular), defined on a lattice of integers or half-integers, rather than a continuous scale. Consequently, for any fixed pair of sample sizes, only a finite set of $p$-values can be generated.The Analytic GRIM-U algorithm, implemented in R, performs a forensic consistency check through a four-step process: (1) defining the search space via inverse probability mapping, (2) generating a lattice of candidate $U$ statistics, (3) computing corresponding $p$-values using multiple standard approximation methods, and (4) verifying consistency against reported rounding precision.
+
+## 1. The Domain of the Test Statistic
+
+For two independent samples of size $n_1$ and $n_2$, the Mann-Whitney $U$ statistic is bounded by 
+
+$$
+[0, n_1 n_2]
+$$
+
+Unlike continuous statistics, $U$ must strictly adhere to a lattice structure:Case A (No Ties): $U$ must be an integer ($U \in \mathbb{Z}$).Case B (Ties): $U$ may be a half-integer ($U \in \{x \mid 2x \in \mathbb{Z}\}$).The algorithm checks if a specific reported $U_{rep}$ (if available) satisfies these granularity and boundary constraints. If $U_{rep}$ is not reported, the algorithm searches for any valid $U$ that could produce $p_{rep}$.
+
+## 2. Inverse Mapping and Search Window
+
+To avoid an exhaustive search of the entire sampling distribution (which becomes computationally expensive as $N$ increases), the algorithm defines a "Candidate Window" of possible $U$ values by inverting the normal approximation.
+
+First, a range of plausible probability values $[p_{min}, p_{max}]$ is established based on the reported precision of $p_{rep}$ (e.g., a $p$-value reported as .05 implies a range of roughly $[.045, .055]$ under standard rounding, or $[.050, .060]$ under truncation).
+
+These boundary probabilities are converted into $Z$-scores ($Z_{min}, Z_{max}$) using the inverse cumulative distribution function of the standard normal distribution ($\Phi^{-1}$). The corresponding bounds for $U$ are estimated using the asymptotic moments of the distribution:
+
+$$
+\mu_U = \frac{n_1 n_2}{2}
+$$
+
+$$
+\sigma_{U} = \sqrt{\frac{n_1 n_2 (N + 1)}{12}}
+$$
+
+The estimated candidate range $[U_{start}, U_{end}]$ is calculated as:
+
+$$
+U_{bound} = \mu_U \pm Z_{bound} \cdot \sigma_U
+$$
+
+To account for approximation errors and the discrete nature of the exact distribution, this range is padded by a buffer (default $\pm 2$ units) and clamped to the physical bounds $[0, n_1 n_2]$.
+
+## 3. Candidate Generation and P-Value Reconstruction
+
+The algorithm generates a grid of all valid integers and half-integers within the candidate range $[U_{start}, U_{end}]$. For every candidate $U$ in this grid, the algorithm calculates five distinct theoretical $p$-values to account for variations in statistical software implementation and data characteristics (specifically, the presence of ties and continuity corrections).
+
+A. Exact Method:Calculated using the recursive properties of the Wilcoxon distribution (pwilcox in R). This is computed only when the candidate $U$ is an integer.
+B. Asymptotic Approximation (Normal Approximation):
+
+Four variations of the $Z$-statistic are computed for every candidate $U$. The general form is:
+
+$$
+Z = \frac{U - \mu_U - \delta_{cc}}{\sigma_{est}}
+$$
+
+where $\delta_{cc}$ represents the continuity correction. 
+
+It is $0.5$ (subtracted from the absolute deviation from the mean) if applied, and $0$ otherwise.$\sigma_{est}$ is the standard error, which varies based on the assumption of tied ranks.
+
+The algorithm implements the following four asymptotic variants:
+
+- Uncorrected, No Ties: $\delta_{cc} = 0$, using $\sigma_{no\_ties}$.
+- Corrected, No Ties: $\delta_{cc} = 0.5$, using $\sigma_{no\_ties}$.
+- Uncorrected, Ties: $\delta_{cc} = 0$, using $\sigma_{ties}$.
+- Corrected, Ties: $\delta_{cc} = 0.5$, using $\sigma_{ties}$.
+
+Note on Ties Variance: To test if any configuration of ties could yield the reported value, the algorithm calculates $\sigma_{ties}$ assuming the minimal possible variance reduction (a single pair of tied ranks). This provides a conservative "existence proof"—if the reported $p$ is consistent with this minimal-tie variance, it is flagged as potentially consistent via the "Ties" pathway. The variance adjustment is:
+
+$$
+\sigma_{ties} = \sqrt{\sigma_{noties}^2 - \frac{n_1 n_2}{2 N (N-1)}}
+$$
+
+## 4. Consistency Verdict
+
+For a reported result to be considered consistent, there must exist at least one candidate $U$ in the search window such that at least one of the five calculated $p$-values rounds or truncates to the reported $p_{rep}$.
+
+The method supports multiple rounding standards (standard round-half-up, truncation, and ceiling) to prevent false positives due to rounding ambiguity. If no candidate $U$ produces a matching $p$-value across any of the five calculatory methods, the reported result is flagged as mathematically inconsistent with the given sample sizes.
+
+# Illustrating granularity in U-test p values
+
+NOTE THAT THIS IS ONLY FOR THE EXACT TEST WITH NO TIES, NOT FOR TIES OR ASYPTOTIC P VALUES
+
+## Long format plot
+
+```{r fig.height=8, fig.width=4}
+
+# --- 1. Generate All Permutations (The "Universe" of Possibilities) ---
+# We use N=3 vs N=3 because 20 combinations is perfect for a single slide/plot.
+n1 <- 3
+n2 <- 4
+N_total <- n1 + n2
+
+# Generate all possible rank positions for Group 1
+# combn returns a matrix where each column is a set of ranks for Group 1
+rank_combinations <- combn(1:N_total, n1, simplify = FALSE)
+
+# Process into a tidy format
+possibilities <- tibble(
+  perm_id = seq_along(rank_combinations),
+  ranks_g1 = rank_combinations
+) %>%
+  rowwise() %>%
+  mutate(
+    # Calculate U for Group 1: Sum(Ranks) - n(n+1)/2
+    sum_ranks = sum(ranks_g1),
+    U = sum_ranks - (n1 * (n1 + 1) / 2),
+    
+    # Calculate Exact P-value (Two-sided)
+    p_value = wilcox.test(x = ranks_g1, y = setdiff(1:N_total, ranks_g1))$p.value
+  ) %>%
+  ungroup() %>%
+  # Sort by U so the plot looks organized (Perfect separation -> Mixed)
+  arrange(U) %>%
+  mutate(perm_id = factor(perm_id, levels = perm_id)) |>
+  mutate(y_label = as.factor(row_number()))
+
+# Expand for the "Strip Plot" (Barcode view)
+# We need a row for every rank position (1 to 6) for every permutation
+plot_data <- possibilities %>%
+  mutate(
+    rank_pos = list(1:N_total),
+    # map2 returns a list naturally, which fits into the list-column
+    group_at_rank = map2(rank_pos, ranks_g1, ~ ifelse(.x %in% .y, "Group 1", "Group 2"))
+  ) %>%
+  unnest(cols = c(rank_pos, group_at_rank))
+
+# --- 2. Create the Visualizations ---
+
+# Plot A: The Permutations (Visualizing the "Ranks")
+p_ranks <- ggplot(plot_data, aes(x = rank_pos, y = y_label, fill = group_at_rank)) +
+  geom_tile(color = "white", width = 0.9, height = 0.8, alpha = 0.8) +
+  #scale_fill_manual(values = c("Group 1" = "#4477AA", "Group 2" = "#BBCC33")) +
+  scale_fill_manual(values = c("Group 1" = my_colors[1], "Group 2" = my_colors[2])) +
+  scale_x_continuous(breaks = 1:N_total, name = "Data (Rank Position)") +
+  labs(
+    title = "Granularity of U-test p values",
+    subtitle = paste0("With N=", n1, " vs N=", n2, " in the groups, there are exactly ", nrow(possibilities), "\npossible ways the data can be ranked with no ties."),
+    y = "Permutation (Sorted by U)",
+    fill = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    
+    # Strictly remove all grid lines
+    panel.grid = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    
+    # Remove axis ticks and lines for a cleaner look
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    
+    # # Keep X axis text, hide Y axis text
+    # axis.text.y = element_blank(),
+    legend.position = "bottom"
+  )
+
+# Plot B: The Granularity (Visualizing the U and P)
+# We highlight the discrete nature of U and P
+p_stats <- possibilities %>%
+  ggplot(aes(y = perm_id)) +
+  # Connect U and P visually
+  #geom_segment(aes(x = 0, xend = 1, y = perm_id, yend = perm_id), color = "white", linewidth = 5.5) +
+  
+  # # Plot the U value
+  # geom_text(aes(x = 0.2, label = paste0("U = ", U)), color = "gray30", fontface = "bold", size = 5) +
+  
+  # Plot the P value
+  # geom_label(aes(x = 0.8, label = sprintf("p = %.3f", p_value),
+  #                fill = factor(p_value)),
+  #            color = "white", size = 4.5, show.legend = FALSE) +
+  # 
+  # geom_label(aes(x = 0.2, label = paste0("U = ", U),
+  #                fill = factor(p_value)),
+  #            color = "white", size = 4.5, show.legend = FALSE) +
+  
+  # geom_label(aes(x = 0.5, 
+  #                label = sprintf("U = %s, p = %.3f", U, p_value), 
+  #                fill = factor(p_value)), 
+  #            color = "white", size = 4.5, fontface = "bold", show.legend = FALSE) +
+  
+  geom_text(aes(
+    x = 0.15, 
+    label = sprintf("U = %s, p = %s", U, sub("^0", "", sprintf("%.3f", p_value)))
+  ), 
+  size = 3, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  scale_fill_viridis_d(option = "magma", end = 0.8) +
+  scale_x_continuous(limits = c(0, 0.3), name = "Results") +
+  labs(
+    # title = "Results",
+    # subtitle = paste0("Only some U and p values are possible."),
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    #axis.title = element_blank(),  # Hides "Resulting Statistics" to match your void look
+    panel.border = element_blank()
+  )
+
+# Combine
+final_plot <- p_ranks + p_stats + 
+  plot_layout(widths = c(1, 1))
+
+
+final_plot
+
+```
+
+## Wide format plot
+
+```{r fig.height=5, fig.width=16}
+
+# --- 1. Generate Data (Unchanged) ---
+n1 <- 3
+n2 <- 4
+N_total <- n1 + n2
+rank_combinations <- combn(1:N_total, n1, simplify = FALSE)
+
+possibilities <- tibble(
+  perm_id = seq_along(rank_combinations),
+  ranks_g1 = rank_combinations
+) %>%
+  rowwise() %>%
+  mutate(
+    sum_ranks = sum(ranks_g1),
+    U = sum_ranks - (n1 * (n1 + 1) / 2),
+    p_value = wilcox.test(x = ranks_g1, y = setdiff(1:N_total, ranks_g1))$p.value
+  ) %>%
+  ungroup() %>%
+  arrange(U) %>%
+  mutate(perm_id = factor(perm_id, levels = perm_id))
+
+
+
+plot_data <- possibilities %>%
+  mutate(
+    rank_pos = list(1:N_total),
+    group_at_rank = map2(rank_pos, ranks_g1, ~ ifelse(.x %in% .y, "Group 1", "Group 2"))
+  ) %>%
+  unnest(cols = c(rank_pos, group_at_rank))
+
+# --- 2. Create the Visualizations (Corrected) ---
+
+# Plot A: The Permutations 
+# X = Permutation, Y = Rank Position
+p_ranks <- ggplot(plot_data, aes(x = perm_id, y = rank_pos, fill = group_at_rank)) +
+  geom_tile(color = "white", width = 0.9, height = 0.9, alpha = 0.8) +
+  scale_fill_manual(values = c("Group 1" = my_colors[1], "Group 2" = my_colors[2])) +
+  
+  # FIX: Rank position is now on the Y axis, so we use scale_y_continuous
+  scale_y_reverse(breaks = 1:N_total, name = "Data (Rank Position)") +
+  
+  labs(
+    title = "Granularity of Mann-Whitney U-test p values",
+    subtitle = paste0("With N=", n1, " in group 1 and N=", n2, " in group 2, there are ", nrow(possibilities), " possible permutations."),
+    x = NULL, # Hide X label to merge with bottom plot
+    fill = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", margin = margin(b=5)),
+    plot.subtitle = element_text(size = 9, color = "gray40"),
+    strip.text = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    # We hide the X axis text because it will be shared with the bottom plot
+    axis.text.x = element_blank(),
+    legend.position = "right" 
+  ) 
+#coord_fixed(ratio = 1) 
+
+# Plot B: The Granularity
+# X = Permutation (Must match plot A)
+p_stats <- possibilities %>%
+  ggplot(aes(x = perm_id)) +
+  
+  # Stacked Labels
+  # geom_label(aes(
+  #   y = 0.25, 
+  #   fill = factor(p_value),
+  #   label = sprintf("%.3f", p_value)
+  # ), 
+  # color = "white", 
+  # size = 3.5, fontface = "bold", show.legend = FALSE) +
+  # 
+  # geom_label(aes(
+  #   y = 0.75, 
+  #   fill = factor(p_value),
+  #   label = U
+  # ), 
+  # color = "white", 
+  # size = 3.5, fontface = "bold", show.legend = FALSE) +
+  
+  geom_text(aes(
+    y = 0.25, 
+    label = sub("^0", "", sprintf("%.3f", p_value))
+  ), 
+  size = 3.5, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  geom_text(aes(
+    y = 0.75, 
+    label = U
+  ), 
+  size = 3.5, 
+  #fontface = "bold", 
+  show.legend = FALSE) +
+  
+  # scale_fill_viridis_d(option = "magma", end = 0.8) +
+  
+  # CHANGE 1: Define breaks at the exact heights of your labels (0.25 and 0.75)
+  # and assign the labels "p" and "U" to them.
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0.25, 0.75), 
+                     labels = c("p value", "U value")) +
+  labs(
+    title = NULL,
+    x = "Permutation (Sorted by U)",
+    y = "Results"
+  ) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank(),
+    
+    # # CHANGE 2: Enable the Y-axis text so "U" and "p" are visible
+    # axis.text.y = element_text(),
+    axis.text.x = element_blank(),
+    
+    axis.ticks = element_blank(),
+    panel.border = element_blank()
+  )
+
+# --- 3. Combine ---
+final_plot <- p_ranks / p_stats + 
+  plot_layout(heights = c(4, 1))
+
+print(final_plot)
+
+```
+
+# Illustrate how possible p values increases with N
+
+```{r fig.height=8, fig.width=16}
+
+analyticgrimu::plot_grimu_probability(n1_vec = c(8, 30, 70), n2_vec = c(9, 31, 71))
+
+```
