@@ -1,3 +1,5 @@
 *.DS_Store
 validation/analytic-GRIM-U/simulation.rds
 *.Rhistory
+/doc/
+/Meta/
