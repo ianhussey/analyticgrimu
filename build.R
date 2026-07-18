@@ -8,13 +8,17 @@ devtools::document()
 
 devtools::check(vignettes = FALSE)
 
-#devtools::install()
+#devtools::install(build_vignettes = TRUE)
+#vignette("analyticgrimu")
+
 # or from github, after push
 devtools::install_github("ianhussey/analyticgrimu")
 
 library(analyticgrimu)
 
 ?analyticgrimu
+
+vignette("analyticgrimu")
 
 detach("package:analyticgrimu", unload=TRUE)
 
