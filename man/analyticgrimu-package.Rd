@@ -4,12 +4,23 @@
 \name{analyticgrimu-package}
 \alias{analyticgrimu}
 \alias{analyticgrimu-package}
-\title{Analtyic GRIM-U: A granularity test for Mann-Whitney U tests}
+\title{analyticgrimu: Granularity Testing for Mann-Whitney U Test Results}
 \description{
-An implementation of GRIM-U.
+An implementation of the GRIM-U granularity test of Heathers and Grimes
+(2025), a forensic meta-science tool for checking whether reported
+Mann-Whitney U test statistics and p-values are mathematically possible
+given the group sample sizes and the rounding of the reported values.
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/ianhussey/analyticgrimu}
+  \item Report bugs at \url{https://github.com/ianhussey/analyticgrimu/issues}
+}
+
 }
 \author{
-\strong{Maintainer}: Ian Hussey \email{Ian.hussey@unibe.ch} (\href{https://orcid.org/0000-0001-8906-7559}{ORCID})
+\strong{Maintainer}: Ian Hussey \email{ian.hussey@unibe.ch} (\href{https://orcid.org/0000-0001-8906-7559}{ORCID})
 
 }
 \keyword{internal}

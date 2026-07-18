@@ -33,8 +33,8 @@ A tibble where each row is a candidate U value, containing:
 \item{p_exact_dev}{Exact p-value, SPSS Exact / StatXact deviation-from-mean convention
 (two-sided integer U only; NA otherwise).}
 \item{p_mid}{Mid-p value (integer U only; NA otherwise).}
-\item{p_corr_K{K}}{Asymptotic continuity-corrected p-value under tie-correction K. One column per achievable K.}
-\item{p_uncorr_K{K}}{Asymptotic uncorrected p-value under tie-correction K. One column per achievable K.}
+\item{p_corr_K*}{Asymptotic continuity-corrected p-value under tie-correction K; one column per achievable K, named \code{p_corr_K} followed by the K value.}
+\item{p_uncorr_K*}{Asymptotic uncorrected p-value under tie-correction K; one column per achievable K, named \code{p_uncorr_K} followed by the K value.}
 }
 \description{
 The core engine for GRIM-U. Generates a grid of valid U statistics (integers and half-integers)
