@@ -6,6 +6,8 @@
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[![DOI](https://zenodo.org/badge/1131604883.svg)](https://doi.org/10.5281/zenodo.21434617)
 <!-- badges: end -->
 
 `analyticgrimu` is a trustworthiness-assessment / forensic-metascience tool for deciding whether a reported Mann-Whitney U test result is mathematically possible. Given the two group sizes, it recalculates the attainable U statistics and p-values and compares them against the reported values, taking into account (a) the rounding of the reported inputs and (b) the several p-value conventions used by different statistical software.
@@ -125,7 +127,7 @@ plot_grimu_probability(n1_vec = c(8, 30), n2_vec = c(9, 31))
 
 ## Suggested citation
 
-Hussey, I. (2026). analyticgrimu: Granularity Testing for Mann-Whitney U Test Results. [Computer software] <https://github.com/ianhussey/analyticgrimu>
+Hussey, I. (2026). analyticgrimu: Granularity Testing for Mann-Whitney U Test Results. [Computer software] <https://github.com/ianhussey/analyticgrimu> [doi:10.5281/zenodo.21434617](https://doi.org/10.5281/zenodo.21434617)
 
 ## License
 
