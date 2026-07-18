@@ -1,28 +1,47 @@
 Package: analyticgrimu
-Title: An implementation of Heathers and Grimes' (2025) GRIM-U, a granularity test for the results of Mann-Whitney U tests.
-Version: 0.2
+Title: Granularity Testing for Reported Mann-Whitney U Test Results
+Version: 0.2.1
 Authors@R: c(
-    person("Ian", "Hussey", , "Ian.hussey@unibe.ch", role = c("aut", "cre"),
+    person("Ian", "Hussey", , "ian.hussey@unibe.ch", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0001-8906-7559"))
   )
-Description: An implementation of GRIM-U.
+Description: Forensic meta-science tools for checking whether reported
+    Mann-Whitney U test results are mathematically possible. Published U
+    statistics and p-values are rounded, so a reported value is consistent
+    only if some attainable exact value falls within its rounding window.
+    Given the two group sizes, the package enumerates every U statistic the
+    test can produce and the p-values it implies under the reporting
+    conventions of common software (exact doubled-tail, 'SPSS' Exact /
+    'StatXact' deviation-from-mean, mid-p, and tie-corrected asymptotic
+    approximations), then asks whether the reported statistic, p-value, and
+    their pairing could have arisen together. When none can, the reported
+    result is flagged 'inconsistent'. This implements the GRIM-U granularity
+    test of Heathers and Grimes (2025)
+    <https://medicalevidenceproject.org/grim-u-observation-establish-impossible-p-values-ranked-tests/>,
+    extending the GRIM family of consistency tests to ranked tests. The
+    package also reports the granularity (p-value saturation) of a design
+    and visualises the attainable p-value space.
 License: MIT + file LICENSE
+URL: https://github.com/ianhussey/analyticgrimu
+BugReports: https://github.com/ianhussey/analyticgrimu/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Depends: 
+Depends:
     R (>= 4.1.0)
 Imports:
     dplyr,
-    tibble,
     ggplot2,
-    ggstance,
-    scales,
-    roundwork,
+    partitions,
     purrr,
-    partitions
+    roundwork,
+    stats,
+    tibble
 Suggests:
-    devtools,
-    roxygen2
+    knitr,
+    rmarkdown,
+    spelling,
+    testthat (>= 3.0.0)
 VignetteBuilder: knitr
-BuildVignettes: false
+Language: en-US
+Config/testthat/edition: 3
