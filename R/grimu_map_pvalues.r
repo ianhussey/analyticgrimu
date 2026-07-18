@@ -80,6 +80,10 @@ achievable_K_values <- function(N, max_partition_size = 15) {
 #'   \item{p_mid}{Mid-p value (integer U only; NA otherwise).}
 #'   \item{p_corr_K*}{Asymptotic continuity-corrected p-value under tie-correction K; one column per achievable K, named \code{p_corr_K} followed by the K value.}
 #'   \item{p_uncorr_K*}{Asymptotic uncorrected p-value under tie-correction K; one column per achievable K, named \code{p_uncorr_K} followed by the K value.}
+#' @examples
+#' # Attainable U values and their exact p-values for two groups of 8 and 9:
+#' map <- grimu_map_pvalues(n1 = 8, n2 = 9)
+#' head(map[, c("U", "is_integer", "p_exact")])
 #' @export
 grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = "two.sided") {
 

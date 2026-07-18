@@ -92,3 +92,14 @@ may therefore reflect this method's coverage gap rather than a real inconsistenc
 in the report. Users investigating a flagged result should check the source
 software before treating the flag as evidence of an error.
 }
+\examples{
+# Check a reported p-value against a design (U not reported):
+res <- grimu_check(n1 = 8, n2 = 8, p_reported = 0.017, digits = 3)
+res$summary[, c("n1", "n2", "p_reported", "consistent")]
+
+# Triangulate a reported U and p-value together: each is attainable, but
+# not as a pair, so the overall verdict is inconsistent.
+res_u <- grimu_check(n1 = 10, n2 = 12, u_reported = 30,
+                     p_reported = 0.041, digits = 3)
+res_u$summary[, c("consistent", "u_matches_p")]
+}

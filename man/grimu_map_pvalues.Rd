@@ -51,3 +51,8 @@ larger K values cover multi-tie patterns. Columns are named \verb{p_corr_K\{valu
 \verb{p_uncorr_K\{value\}}.
 }
 }
+\examples{
+# Attainable U values and their exact p-values for two groups of 8 and 9:
+map <- grimu_map_pvalues(n1 = 8, n2 = 9)
+head(map[, c("U", "is_integer", "p_exact")])
+}

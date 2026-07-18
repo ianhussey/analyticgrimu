@@ -33,7 +33,5 @@ Note that this function assumes the absence of ties and uses exact
 probability calculations.
 }
 \examples{
-\dontrun{
 plot_grimu_probability(n1_vec = c(8, 30), n2_vec = c(9, 31))
-}
 }

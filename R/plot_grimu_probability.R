@@ -32,9 +32,7 @@
 #' @export
 #'
 #' @examples
-#' \dontrun{
 #' plot_grimu_probability(n1_vec = c(8, 30), n2_vec = c(9, 31))
-#' }
 plot_grimu_probability <- function(n1_vec, n2_vec) {
   
   if (length(n1_vec) != length(n2_vec)) {

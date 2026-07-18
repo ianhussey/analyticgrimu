@@ -32,3 +32,7 @@ Calculates the proportion of all possible rounded p-values (at a given precision
 mathematically attainable by a Mann-Whitney U test with sample sizes n1 and n2.
 Used to estimate the False Positive Rate (FPR) of a GRIM-U check for a specific N.
 }
+\examples{
+# Proportion of 3-decimal p-values attainable for two groups of 8 and 9:
+grimu_saturation(n1 = 8, n2 = 9, decimals = 3)
+}

@@ -13,6 +13,12 @@
 #'   \item{u_bounds_consistent}{Logical. TRUE if 0 <= U <= n1*n2.}
 #'   \item{u_granularity_consistent}{Logical. TRUE if U is an integer or half-integer.}
 #'   \item{u_possible}{Logical. TRUE if both checks pass.}
+#' @examples
+#' # A valid integer U for two groups of 10 and 12:
+#' check_u_consistency(n1 = 10, n2 = 12, u_reported = 30)
+#'
+#' # A U that is neither an integer nor a half-integer is impossible:
+#' check_u_consistency(n1 = 10, n2 = 12, u_reported = 30.3)
 #' @export
 check_u_consistency <- function(n1, n2, u_reported) {
   u_max <- n1 * n2

@@ -12,6 +12,9 @@
 #'
 #' @return A numeric value between 0 and 1 representing the saturation ratio:
 #'   (Unique attainable rounded p-values) / (Total possible bins in range).
+#' @examples
+#' # Proportion of 3-decimal p-values attainable for two groups of 8 and 9:
+#' grimu_saturation(n1 = 8, n2 = 9, decimals = 3)
 #' @export
 grimu_saturation <- function(n1, n2, decimals = 3, p_lower_threshold = 0, p_upper_threshold = 1) {
   

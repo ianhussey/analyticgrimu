@@ -27,3 +27,10 @@ Checks two properties:
 \item Granularity: U must be an integer (no ties) or half-integer (with ties).
 }
 }
+\examples{
+# A valid integer U for two groups of 10 and 12:
+check_u_consistency(n1 = 10, n2 = 12, u_reported = 30)
+
+# A U that is neither an integer nor a half-integer is impossible:
+check_u_consistency(n1 = 10, n2 = 12, u_reported = 30.3)
+}
