@@ -26,3 +26,12 @@ detach("package:analyticgrimu", unload=TRUE)
 devtools::build_vignettes()
 devtools::check()
 
+# cran checks
+# win-builder 
+library(devtools)
+check_win_devel()        # emails results to the maintainer address in DESCRIPTION
+
+# R-hub 
+library(rhub)
+# rhub_setup() # one time
+rhub_check()             # v2: runs on GitHub Actions in your repo
