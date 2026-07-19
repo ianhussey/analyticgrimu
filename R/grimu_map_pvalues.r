@@ -28,9 +28,11 @@
 achievable_K_values <- function(N, max_partition_size = 15) {
   key <- paste(N, max_partition_size, sep = "_")
   cached <- .K_cache[[key]]
-  if (!is.null(cached)) return(cached)
+  if (!is.null(cached)) {
+    return(cached)
+  }
 
-  Ks <- 0  # always include the no-ties case
+  Ks <- 0 # always include the no-ties case
   s_max <- min(N, max_partition_size)
   if (s_max >= 2) {
     for (s in 2:s_max) {
@@ -85,10 +87,17 @@ achievable_K_values <- function(N, max_partition_size = 15) {
 #' map <- grimu_map_pvalues(n1 = 8, n2 = 9)
 #' head(map[, c("U", "is_integer", "p_exact")])
 #' @export
-grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = "two.sided") {
-
+grimu_map_pvalues <- function(
+  n1,
+  n2,
+  u_min = NULL,
+  u_max = NULL,
+  alternative = "two.sided"
+) {
   # Safety Check: Input Validation
-  if (is.na(n1) || is.na(n2)) return(tibble(U = numeric(), is_integer = logical()))
+  if (is.na(n1) || is.na(n2)) {
+    return(tibble(U = numeric(), is_integer = logical()))
+  }
 
   alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
   N <- n1 + n2
@@ -98,28 +107,38 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
   # Default bounds logic
   if (is.null(u_min) || is.null(u_max)) {
     if (alternative == "greater") {
-      if (is.null(u_min)) u_min <- floor(mu)
+      if (is.null(u_min)) {
+        u_min <- floor(mu)
+      }
       if (is.null(u_max)) u_max <- max_u
     } else {
-      if (is.null(u_min)) u_min <- 0
+      if (is.null(u_min)) {
+        u_min <- 0
+      }
       if (is.null(u_max)) u_max <- ceiling(mu)
     }
   }
 
   # Enforce Half-Integer Lattice
   # Snap arbitrary bounds to the nearest valid U values (integers or half-integers).
-  if (is.null(u_min)) u_min <- 0
-  if (is.null(u_max)) u_max <- max_u
+  if (is.null(u_min)) {
+    u_min <- 0
+  }
+  if (is.null(u_max)) {
+    u_max <- max_u
+  }
 
   u_start <- ceiling(u_min * 2) / 2
-  u_end   <- floor(u_max * 2) / 2
+  u_end <- floor(u_max * 2) / 2
 
   # Safety Clamp
   u_start <- max(0, u_start)
-  u_end   <- min(max_u, u_end)
+  u_end <- min(max_u, u_end)
 
   # Safety Check: If start > end, return empty tibble immediately
-  if (u_start > u_end) return(tibble(U = numeric(), is_integer = logical()))
+  if (u_start > u_end) {
+    return(tibble(U = numeric(), is_integer = logical()))
+  }
 
   vals <- roundwork::round_up(seq(u_start, u_end, by = 0.5), 1)
 
@@ -133,25 +152,29 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
 
       dev_cc = case_when(
         alternative == "two.sided" ~ pmax(0, abs(U - mu) - 0.5),
-        alternative == "less"      ~ (U - mu) + 0.5,
-        alternative == "greater"   ~ (U - mu) - 0.5
+        alternative == "less" ~ (U - mu) + 0.5,
+        alternative == "greater" ~ (U - mu) - 0.5
       ),
       dev_uncorr = case_when(
         alternative == "two.sided" ~ abs(U - mu),
-        alternative == "less"      ~ (U - mu),
-        alternative == "greater"   ~ (U - mu)
+        alternative == "less" ~ (U - mu),
+        alternative == "greater" ~ (U - mu)
       ),
 
       # Exact (R / SciPy doubled-tail convention)
-      p_exact = if_else(is_integer, case_when(
-        alternative == "less"      ~ pwilcox(U, n1, n2),
-        alternative == "greater"   ~ pwilcox(U - 1, n1, n2, lower.tail = FALSE),
-        alternative == "two.sided" ~ {
-          p_lower <- pwilcox(U, n1, n2)
-          p_upper <- pwilcox(U - 1, n1, n2, lower.tail = FALSE)
-          2 * pmin(p_lower, p_upper)
-        }
-      ), NA_real_),
+      p_exact = if_else(
+        is_integer,
+        case_when(
+          alternative == "less" ~ pwilcox(U, n1, n2),
+          alternative == "greater" ~ pwilcox(U - 1, n1, n2, lower.tail = FALSE),
+          alternative == "two.sided" ~ {
+            p_lower <- pwilcox(U, n1, n2)
+            p_upper <- pwilcox(U - 1, n1, n2, lower.tail = FALSE)
+            2 * pmin(p_lower, p_upper)
+          }
+        ),
+        NA_real_
+      ),
 
       # Exact (SPSS Exact / StatXact deviation-from-mean convention).
       # Defined only for two-sided integer U. At U = mu the raw sum equals
@@ -177,11 +200,18 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
       p_mid = if_else(
         is_integer,
         case_when(
-          alternative == "less"      ~ pwilcox(U, n1, n2) - 0.5 * dwilcox(U, n1, n2),
-          alternative == "greater"   ~ pwilcox(U - 1, n1, n2, lower.tail = FALSE) - 0.5 * dwilcox(U, n1, n2),
+          alternative == "less" ~ pwilcox(U, n1, n2) - 0.5 * dwilcox(U, n1, n2),
+          alternative == "greater" ~ pwilcox(
+            U - 1,
+            n1,
+            n2,
+            lower.tail = FALSE
+          ) -
+            0.5 * dwilcox(U, n1, n2),
           alternative == "two.sided" ~ {
             mid_lower <- pwilcox(U, n1, n2) - 0.5 * dwilcox(U, n1, n2)
-            mid_upper <- pwilcox(U - 1, n1, n2, lower.tail = FALSE) - 0.5 * dwilcox(U, n1, n2)
+            mid_upper <- pwilcox(U - 1, n1, n2, lower.tail = FALSE) -
+              0.5 * dwilcox(U, n1, n2)
             2 * pmin(mid_lower, mid_upper)
           }
         ),
@@ -198,27 +228,31 @@ grimu_map_pvalues <- function(n1, n2, u_min = NULL, u_max = NULL, alternative = 
   # Vectorised via outer() to avoid an R-level loop over K_vals: at large N
   # there can be ~100 K values and ~thousands of U candidates, and the
   # column-by-column assignment was the dominant cost in the previous loop.
-  sigma_vec <- sqrt((n1 * n2 * (N + 1)) / 12 -
-                      (n1 * n2 * K_vals) / (12 * N * (N - 1)))
+  sigma_vec <- sqrt(
+    (n1 * n2 * (N + 1)) / 12 - (n1 * n2 * K_vals) / (12 * N * (N - 1))
+  )
   # NaN protection: sigma_K = 0 (degenerate all-tied case) gives Inf z and
   # p = 0 after pnorm, which is harmless; pmin(1, .) below leaves it at 0.
-  z_corr_mat   <- outer(results_df$dev_cc,    sigma_vec, "/")
+  z_corr_mat <- outer(results_df$dev_cc, sigma_vec, "/")
   z_uncorr_mat <- outer(results_df$dev_uncorr, sigma_vec, "/")
   if (alternative == "two.sided") {
-    p_corr_mat   <- 2 * pnorm(z_corr_mat,   lower.tail = FALSE)
+    p_corr_mat <- 2 * pnorm(z_corr_mat, lower.tail = FALSE)
     p_uncorr_mat <- 2 * pnorm(z_uncorr_mat, lower.tail = FALSE)
   } else if (alternative == "less") {
-    p_corr_mat   <- pnorm(z_corr_mat,   lower.tail = TRUE)
+    p_corr_mat <- pnorm(z_corr_mat, lower.tail = TRUE)
     p_uncorr_mat <- pnorm(z_uncorr_mat, lower.tail = TRUE)
-  } else { # "greater"
-    p_corr_mat   <- pnorm(z_corr_mat,   lower.tail = FALSE)
+  } else {
+    # "greater"
+    p_corr_mat <- pnorm(z_corr_mat, lower.tail = FALSE)
     p_uncorr_mat <- pnorm(z_uncorr_mat, lower.tail = FALSE)
   }
-  colnames(p_corr_mat)   <- paste0("p_corr_K",   K_vals)
+  colnames(p_corr_mat) <- paste0("p_corr_K", K_vals)
   colnames(p_uncorr_mat) <- paste0("p_uncorr_K", K_vals)
-  results_df <- bind_cols(results_df,
-                          tibble::as_tibble(p_corr_mat),
-                          tibble::as_tibble(p_uncorr_mat))
+  results_df <- bind_cols(
+    results_df,
+    tibble::as_tibble(p_corr_mat),
+    tibble::as_tibble(p_uncorr_mat)
+  )
 
   # Final cap at p <= 1.
   # This is required for both exact two-sided columns (p_exact and p_exact_dev),

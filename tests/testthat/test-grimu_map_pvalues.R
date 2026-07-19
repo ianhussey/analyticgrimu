@@ -18,8 +18,7 @@ test_that("all p-value columns stay within [0, 1]", {
   for (col in p_cols) {
     vals <- res[[col]]
     vals <- vals[!is.na(vals)]
-    expect_true(all(vals >= 0 & vals <= 1),
-                info = paste("column", col))
+    expect_true(all(vals >= 0 & vals <= 1), info = paste("column", col))
   }
 })
 

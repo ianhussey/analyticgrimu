@@ -14,8 +14,13 @@ test_that("an attainable p-value is flagged consistent", {
 
 test_that("a reported U inconsistent with the p-value is caught", {
   # p = 0.041 cannot be produced together with U = 30 at n1 = 10, n2 = 12
-  res <- grimu_check(n1 = 10, n2 = 12, u_reported = 30,
-                     p_reported = 0.041, digits = 3)
+  res <- grimu_check(
+    n1 = 10,
+    n2 = 12,
+    u_reported = 30,
+    p_reported = 0.041,
+    digits = 3
+  )
   expect_false(res$summary$consistent)
   expect_false(res$summary$u_matches_p)
 })

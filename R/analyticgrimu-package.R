@@ -13,10 +13,26 @@
 # dplyr/ggplot2 pipelines (bare column names have no visible binding).
 utils::globalVariables(c(
   ".",
-  "U", "is_integer", "dev_cc", "dev_uncorr",
-  "p_exact", "p_exact_dev", "p_mid", "p_corr_K0", "p_uncorr_K0",
-  "valid_exact", "valid_exact_dev", "valid_mid",
-  "valid_corr_no_ties", "valid_uncorr_no_ties",
-  "valid_corr_ties", "valid_uncorr_ties", "is_consistent",
-  "val", "y_row", "x_col", "is_possible", "facet_label"
+  "U",
+  "is_integer",
+  "dev_cc",
+  "dev_uncorr",
+  "p_exact",
+  "p_exact_dev",
+  "p_mid",
+  "p_corr_K0",
+  "p_uncorr_K0",
+  "valid_exact",
+  "valid_exact_dev",
+  "valid_mid",
+  "valid_corr_no_ties",
+  "valid_uncorr_no_ties",
+  "valid_corr_ties",
+  "valid_uncorr_ties",
+  "is_consistent",
+  "val",
+  "y_row",
+  "x_col",
+  "is_possible",
+  "facet_label"
 ))

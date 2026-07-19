@@ -68,23 +68,36 @@
 #'                      p_reported = 0.041, digits = 3)
 #' res_u$summary[, c("consistent", "u_matches_p")]
 #' @export
-grimu_check <- function(n1, n2,
-                        u_reported = NA_real_,
-                        comparison = "equal",
-                        p_reported,
-                        digits,
-                        rounding = NULL,
-                        p_min = NULL, p_max = NULL,
-                        alternative = "two.sided") {
-
+grimu_check <- function(
+  n1,
+  n2,
+  u_reported = NA_real_,
+  comparison = "equal",
+  p_reported,
+  digits,
+  rounding = NULL,
+  p_min = NULL,
+  p_max = NULL,
+  alternative = "two.sided"
+) {
   alternative <- match.arg(alternative, c("two.sided", "less", "greater"))
 
   # --- Fail-Fast Validation ---
-  if (is.na(n1) || is.na(n2)) stop("n1 and n2 must be supplied")
+  if (is.na(n1) || is.na(n2)) {
+    stop("n1 and n2 must be supplied")
+  }
 
   is_whole <- function(x) !is.na(x) && abs(x - round(x)) < 1e-10
   if (!is_whole(n1) || !is_whole(n2)) {
-    return(list(summary = tibble(n1=n1, n2=n2, consistent=NA, error="Non-integer N"), details=tibble()))
+    return(list(
+      summary = tibble(
+        n1 = n1,
+        n2 = n2,
+        consistent = NA,
+        error = "Non-integer N"
+      ),
+      details = tibble()
+    ))
   }
 
   if (!is.na(p_reported)) {
@@ -93,8 +106,12 @@ grimu_check <- function(n1, n2,
     }
   }
 
-  if (!is.na(p_reported) & (p_reported < 0 || p_reported > 1)) stop("p_reported must be [0,1]")
-  if (!is.numeric(u_reported)) stop("u_reported must be numeric or NA")
+  if (!is.na(p_reported) & (p_reported < 0 || p_reported > 1)) {
+    stop("p_reported must be [0,1]")
+  }
+  if (!is.numeric(u_reported)) {
+    stop("u_reported must be numeric or NA")
+  }
 
   # --- Step 1: Check Global U Validity ---
   if (!is.na(u_reported)) {
@@ -138,10 +155,16 @@ grimu_check <- function(n1, n2,
   # Helper: Convert P to Z (Signed)
   p_to_z <- function(p, alt) {
     p_safe <- min(1, max(0, p))
-    if (is.na(p)) return(Inf)
-    if (alt == "two.sided") return(qnorm(1 - p_safe / 2))
-    if (alt == "less")      return(qnorm(p_safe))
-    if (alt == "greater")   return(qnorm(1 - p_safe))
+    if (is.na(p)) {
+      return(Inf)
+    }
+    if (alt == "two.sided") {
+      return(qnorm(1 - p_safe / 2))
+    }
+    if (alt == "less") {
+      return(qnorm(p_safe))
+    }
+    if (alt == "greater") return(qnorm(1 - p_safe))
   }
 
   # Helper: enumerate candidate U range under a given alternative and pull p-values.
@@ -153,18 +176,26 @@ grimu_check <- function(n1, n2,
     u_bound_1 <- mu + z_deep * sigma_est
     u_bound_2 <- mu + z_shallow * sigma_est
 
-    if (is.na(u_bound_1) || is.nan(u_bound_1)) u_bound_1 <- if (alt == "greater") max_u else 0
-    if (is.na(u_bound_2) || is.nan(u_bound_2)) u_bound_2 <- if (alt == "greater") mu else mu
+    if (is.na(u_bound_1) || is.nan(u_bound_1)) {
+      u_bound_1 <- if (alt == "greater") max_u else 0
+    }
+    if (is.na(u_bound_2) || is.nan(u_bound_2)) {
+      u_bound_2 <- if (alt == "greater") mu else mu
+    }
 
     raw_start <- min(u_bound_1, u_bound_2)
-    raw_end   <- max(u_bound_1, u_bound_2)
+    raw_end <- max(u_bound_1, u_bound_2)
 
     u_start_est <- max(0, floor(raw_start - 2))
-    u_end_est   <- min(max_u, ceiling(raw_end + 2))
+    u_end_est <- min(max_u, ceiling(raw_end + 2))
 
-    candidates <- grimu_map_pvalues(n1, n2,
-                                    u_min = u_start_est, u_max = u_end_est,
-                                    alternative = alt)
+    candidates <- grimu_map_pvalues(
+      n1,
+      n2,
+      u_min = u_start_est,
+      u_max = u_end_est,
+      alternative = alt
+    )
     candidates$alt_used <- alt
     attr(candidates, "u_range") <- c(u_start_est, u_end_est)
     candidates
@@ -204,19 +235,22 @@ grimu_check <- function(n1, n2,
     matched <- rep(FALSE, length(val))
     na_mask <- is.na(val)
     if ("round" %in% methods) {
-      matched <- matched | (!na_mask &
-                              val >= (p_reported - 0.5 * epsilon - buffer) &
-                              val <  (p_reported + 0.5 * epsilon - buffer))
+      matched <- matched |
+        (!na_mask &
+          val >= (p_reported - 0.5 * epsilon - buffer) &
+          val < (p_reported + 0.5 * epsilon - buffer))
     }
     if ("trunc" %in% methods) {
-      matched <- matched | (!na_mask &
-                              val >= (p_reported - buffer) &
-                              val <  (p_reported + epsilon - buffer))
+      matched <- matched |
+        (!na_mask &
+          val >= (p_reported - buffer) &
+          val < (p_reported + epsilon - buffer))
     }
     if ("up" %in% methods) {
-      matched <- matched | (!na_mask &
-                              val >  (p_reported - epsilon + buffer) &
-                              val <= (p_reported + buffer))
+      matched <- matched |
+        (!na_mask &
+          val > (p_reported - epsilon + buffer) &
+          val <= (p_reported + buffer))
     }
     matched
   }
@@ -231,41 +265,49 @@ grimu_check <- function(n1, n2,
 
   # Identify the K-indexed asymptotic columns to distinguish K = 0 (no ties)
   # from K > 0 (ties) in the diagnostic flags.
-  corr_K_cols   <- grep("^p_corr_K",   names(results_df), value = TRUE)
+  corr_K_cols <- grep("^p_corr_K", names(results_df), value = TRUE)
   uncorr_K_cols <- grep("^p_uncorr_K", names(results_df), value = TRUE)
-  corr_ties_cols   <- setdiff(corr_K_cols,   "p_corr_K0")
+  corr_ties_cols <- setdiff(corr_K_cols, "p_corr_K0")
   uncorr_ties_cols <- setdiff(uncorr_K_cols, "p_uncorr_K0")
 
   # Helper to OR check_col_vec across a set of columns (returns a row-vector).
   any_col_matches <- function(df, cols) {
-    if (length(cols) == 0) return(rep(FALSE, nrow(df)))
+    if (length(cols) == 0) {
+      return(rep(FALSE, nrow(df)))
+    }
     Reduce(`|`, lapply(cols, function(cn) check_col_vec(df[[cn]])))
   }
 
   results_checked <- results_df %>%
     mutate(
-      valid_exact          = check_col_vec(p_exact),
-      valid_exact_dev      = check_col_vec(p_exact_dev),
-      valid_mid            = check_col_vec(p_mid),
-      valid_corr_no_ties   = check_col_vec(p_corr_K0),
+      valid_exact = check_col_vec(p_exact),
+      valid_exact_dev = check_col_vec(p_exact_dev),
+      valid_mid = check_col_vec(p_mid),
+      valid_corr_no_ties = check_col_vec(p_corr_K0),
       valid_uncorr_no_ties = check_col_vec(p_uncorr_K0)
     ) %>%
     mutate(
-      valid_corr_ties   = any_col_matches(., corr_ties_cols),
+      valid_corr_ties = any_col_matches(., corr_ties_cols),
       valid_uncorr_ties = any_col_matches(., uncorr_ties_cols)
     ) %>%
     mutate(
-      is_consistent = valid_exact | valid_exact_dev | valid_mid |
-        valid_corr_no_ties | valid_uncorr_no_ties |
-        valid_corr_ties | valid_uncorr_ties
+      is_consistent = valid_exact |
+        valid_exact_dev |
+        valid_mid |
+        valid_corr_no_ties |
+        valid_uncorr_no_ties |
+        valid_corr_ties |
+        valid_uncorr_ties
     ) %>%
     # Filter for display (diagnostic mode): keep rows that are consistent OR
     # have any p-value in the general search window.
     filter(
       is_consistent |
-        if_any(starts_with("p_"),
-               ~ . >= (if (is.na(p_min_search)) 0 else p_min_search) &
-                 . <= p_max_search)
+        if_any(
+          starts_with("p_"),
+          ~ . >= (if (is.na(p_min_search)) 0 else p_min_search) &
+            . <= p_max_search
+        )
     )
 
   # --- Step 5: Triangulate U and P ---
@@ -278,7 +320,8 @@ grimu_check <- function(n1, n2,
     u_consistent <- results_checked %>%
       filter(is_consistent) %>%
       filter(abs(U - u_reported) < 1e-10) %>%
-      nrow() > 0
+      nrow() >
+      0
   } else {
     u_consistent <- NA
   }
@@ -316,11 +359,15 @@ grimu_check <- function(n1, n2,
     p_granularity_consistent = p_consistent,
 
     # Method-resolved diagnostic flags: which convention matched, if any.
-    p_matches_exact_r    = any(results_checked$valid_exact),
+    p_matches_exact_r = any(results_checked$valid_exact),
     p_matches_exact_spss = any(results_checked$valid_exact_dev),
-    p_matches_mid        = any(results_checked$valid_mid),
-    p_matches_no_ties    = any(results_checked$valid_corr_no_ties | results_checked$valid_uncorr_no_ties),
-    p_matches_ties       = any(results_checked$valid_corr_ties   | results_checked$valid_uncorr_ties)
+    p_matches_mid = any(results_checked$valid_mid),
+    p_matches_no_ties = any(
+      results_checked$valid_corr_no_ties | results_checked$valid_uncorr_no_ties
+    ),
+    p_matches_ties = any(
+      results_checked$valid_corr_ties | results_checked$valid_uncorr_ties
+    )
   )
 
   return(list(summary = summary_df, details = results_checked))
