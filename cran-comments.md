@@ -5,7 +5,8 @@ This is a new submission.
 ## Test environments
 
 - local macOS, R release
-- (add before submitting: win-builder devel/release, R-hub, GitHub Actions)
+- win-builder, R devel (via `devtools::check_win_devel()`)
+- GitHub Actions: macOS, Windows, and Ubuntu (R devel, release, and oldrel-1)
 
 ## R CMD check results
 
