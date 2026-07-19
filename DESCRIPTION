@@ -22,7 +22,7 @@ Description: Forensic meta-science tools for checking whether reported
     package also reports the granularity (p-value saturation) of a design
     and visualises the attainable p-value space.
 License: MIT + file LICENSE
-URL: https://github.com/ianhussey/analyticgrimu
+URL: https://github.com/ianhussey/analyticgrimu, https://doi.org/10.5281/zenodo.21434617
 BugReports: https://github.com/ianhussey/analyticgrimu/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
