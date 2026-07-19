@@ -1,3 +1,5 @@
+<img src="man/figures/logo.png" width="30%" alt="analyticgrimu logo" />
+
 # analyticgrimu: Granularity Testing for Mann-Whitney U Test Results
 
 <!-- badges: start -->
@@ -10,7 +12,9 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21434617.svg)](https://doi.org/10.5281/zenodo.21434617)
 <!-- badges: end -->
 
-`analyticgrimu` is a trustworthiness-assessment / forensic-metascience tool for deciding whether a reported Mann-Whitney U test result is mathematically possible. Given the two group sizes, it recalculates the attainable U statistics and p-values and compares them against the reported values, taking into account (a) the rounding of the reported inputs and (b) the several p-value conventions used by different statistical software.
+`analyticgrimu` is a forensic meta-science R package for conducting trustworthiness assessments on reported Mann-Whitney U-test *p*-values. 
+
+Given the two group sizes, it recalculates the attainable U statistics and p-values and compares them against the reported values, taking into account (a) the rounding of the reported inputs and (b) the several p-value conventions used by different statistical software.
 
 It implements the GRIM-U method of Heathers and Grimes ([Medical Evidence Project, Report 1, 2025](https://medicalevidenceproject.org/grim-u-observation-establish-impossible-p-values-ranked-tests/)), which extends the GRIM family of granularity tests from means to ranked tests. Grimes' original implementation is available [here](https://github.com/drg85/GRIMU).
 
