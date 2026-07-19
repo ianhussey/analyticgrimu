@@ -7,7 +7,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[![DOI](https://zenodo.org/badge/1131604883.svg)](https://doi.org/10.5281/zenodo.21434617)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21434617.svg)](https://doi.org/10.5281/zenodo.21434617)
 <!-- badges: end -->
 
 `analyticgrimu` is a trustworthiness-assessment / forensic-metascience tool for deciding whether a reported Mann-Whitney U test result is mathematically possible. Given the two group sizes, it recalculates the attainable U statistics and p-values and compares them against the reported values, taking into account (a) the rounding of the reported inputs and (b) the several p-value conventions used by different statistical software.
