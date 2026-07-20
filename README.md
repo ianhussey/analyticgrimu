@@ -131,7 +131,7 @@ plot_grimu_probability(n1_vec = c(8, 30), n2_vec = c(9, 31))
 
 ## Suggested citation
 
-Hussey, I. (2026). analyticgrimu: Granularity Testing for Mann-Whitney U Test Results. [Computer software] <https://github.com/ianhussey/analyticgrimu> [doi:10.5281/zenodo.21434617](https://doi.org/10.5281/zenodo.21434617)
+Hussey, I. (2026). analyticgrimu: Granularity testing for Mann-Whitney U-test reported results. [Computer software] <https://github.com/ianhussey/analyticgrimu> [doi:10.5281/zenodo.21434617](https://doi.org/10.5281/zenodo.21434617)
 
 ## License
 
