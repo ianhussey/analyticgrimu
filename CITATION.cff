@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "analyticgrimu: Granularity Testing for Mann-Whitney U Test Results"
+title: "analyticgrimu: Granularity testing for Mann-Whitney U-test reported results"
 message: >-
   If you use this software, please cite it as below.
 type: software
