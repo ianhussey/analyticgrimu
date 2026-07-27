@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "analyticgrimu: Granularity Testing for Mann-Whitney U Test Results"
+message: >-
+  If you use this software, please cite it as below.
+type: software
+authors:
+  - family-names: Hussey
+    given-names: Ian
+    email: ian.hussey@unibe.ch
+    orcid: "https://orcid.org/0000-0001-8906-7559"
+abstract: >-
+  Forensic meta-science tools for checking whether reported Mann-Whitney U test
+  results are mathematically possible. Published U statistics and p-values are
+  rounded, so a reported value is consistent only if some attainable exact value
+  falls within its rounding window. Given the two group sizes, the package
+  enumerates every U statistic the test can produce and the p-values it implies
+  under the reporting conventions of common software, then asks whether the
+  reported statistic, p-value, and their pairing could have arisen together.
+keywords:
+  - meta-science
+  - error detection
+  - granularity testing
+  - Mann-Whitney U
+  - R
+version: 0.2.1
+date-released: "2026-07-19"
+doi: 10.5281/zenodo.21434617
+license: MIT
+url: "https://github.com/ianhussey/analyticgrimu"
+repository-code: "https://github.com/ianhussey/analyticgrimu"
