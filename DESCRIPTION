@@ -1,5 +1,5 @@
 Package: analyticgrimu
-Title: Granularity Testing for Reported Mann-Whitney U Test Results
+Title: Granularity testing for Mann-Whitney U-test reported results
 Version: 0.2.1
 Authors@R: c(
     person("Ian", "Hussey", , "ian.hussey@unibe.ch", role = c("aut", "cre"),

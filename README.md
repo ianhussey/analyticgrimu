@@ -135,6 +135,6 @@ Hussey, I. (2026). analyticgrimu: Granularity testing for Mann-Whitney U-test re
 
 ## License
 
-Code is MIT licensed © Ian Hussey (2026).
+Code is MIT licensed © Ian Hussey (2024-2026).
 
 Text and images are CC BY 4.0 (see the suggested citation above).
